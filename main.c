@@ -1,14 +1,10 @@
 //https://mpv.io/manual/master/#list-of-input-commands
-// TODO - I need a key to go back to the previous subtitle so I can change where it ends if I cut it off too early.
-	// And also the ability to go back even more.
-// TODO - Don't just write sub output as I go. This makes it hard to seek back. Instead, use arrays (rawStartTimes, rawEndTimes) to store the times and do the file writing at the end.
-	// This may be a bad idea. If the program crashes all progress is lost. Maybe I should write the timestamps to file (in my own format) just as a backup. My custom format can allow you to have multiple timestamps for one sub where whatever timestamp found in the file last is the one used, so even if I seek back and need to write a new timestamp everything's okay.
-		// This also allows me to have an easy format I can use for loading up the subs for editing again, I won't even have to me .srt parser
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <curses.h>
+#include <unistd.h>
 
 #include "main.h"
 
@@ -38,8 +34,10 @@
 #define PAUSE_STRING "true] }\'"
 #define UNPAUSE_STRING "false] }\'"
 
-#define LRSEEK .5
-#define QWSEEK 1
+#define BONUSEXTENSION ".raw"
+
+#define LRSEEK 1
+#define QWSEEK .5
 
 ///////////////////////////////////////
 char** rawSubs=NULL;
@@ -48,6 +46,7 @@ double* rawStartTimes=NULL;
 double* rawEndTimes=NULL;
 
 FILE* outfp=NULL;
+FILE* backupFp=NULL;
 
 char* lastAction=NULL;
 int lastActionHP=0;
@@ -76,6 +75,15 @@ char isPaused=0;
 		return _myTime.tv_nsec/1000000+_myTime.tv_sec*1000;
 	}
 #endif
+
+char fileExist(char* filename){
+	FILE* fp = fopen(filename,"r");
+	if (fp!=NULL){
+		fclose(fp);
+		return 1;
+	}
+	return 0;
+}
 
 void sendMpvCommand(char* msg){
 	char buff[strlen(MPV_MESSAGE_FORMAT)+strlen(msg)+strlen(REDIRECTOUTPUT)];
@@ -148,6 +156,9 @@ double getSeconds(){
 		FILE* fp = popen("echo \'{ \"command\": [\"get_property\", \"playback-time\"] }\' | socat - "STRMLOC,"r");
 		fread(dresult,sizeof(dresult),1,fp);
 		fclose(fp);
+		if (strstr(dresult,"success")==NULL){
+			return -1;
+		}
 		// Parse info
 		//{"data":434.476000,"error":"success"}
 		char* numStart = strstr(dresult,":");
@@ -177,9 +188,7 @@ void makeTimestamp(double time, char* buff){
 }
 
 //
-void addSub(double startTime, double endTime, char* string){
-	++currentSubIndex;
-	
+void writeSingleSrt(int index, double startTime, double endTime, char* string, FILE* fp){
 	char strstampone[strlen(TIMEFORMAT)];
 	char strstamptwo[strlen(TIMEFORMAT)];
 
@@ -189,14 +198,19 @@ void addSub(double startTime, double endTime, char* string){
 	char complete[strlen(SUBFORMATSTRING)+strlen(strstampone)+strlen(string)+strlen(strstamptwo)+1];
 	sprintf(complete,SUBFORMATSTRING,currentSubIndex,strstampone,strstamptwo,string);
 
-	fwrite(complete,strlen(complete),1,outfp);
-
-
+	fwrite(complete,strlen(complete),1,fp);
+}
+//
+void addSub(double startTime, double endTime){
 	if (currentSubIndex==numRawSubs){
-		printf("Done!\n");
-		deinit();
-		exit(0);
+		setLastAction("None left.");
+		return;
 	}
+	//_lowAddSub(currentSubIndex+1,startTime,endTime,rawSubs[currentSubIndex]);
+	fwrite(&(currentSubIndex),sizeof(int),1,backupFp);
+	fwrite(&(startTime),sizeof(double),1,backupFp);
+	fwrite(&(endTime),sizeof(double),1,backupFp);
+	++currentSubIndex;
 }
 
 void drawList(char** list, int y, int numToDraw, int index, int listSize, char reverseOrder){
@@ -251,6 +265,12 @@ void setLastAction(char* _newMessage){
 	lastActionHP = 5;
 }
 
+void waitMpvStart(){
+	while(getSeconds()==-1){
+		usleep(100000);
+	}
+}
+
 void deinit(){
 	// Deinit curses
 	delwin(mainwin);
@@ -268,18 +288,56 @@ void init(int numArgs, char** argStr){
 		outfp = fopen("./testout","w");
 		loadRawsubs("./testraw");
 	}else if (numArgs>=3 && numArgs<=4){
-		loadRawsubs(argStr[1]);
-		
-		outfp = fopen(argStr[2],"w");
-				
+
 		// Start mpv
 		if (numArgs==4){
 			char buff[strlen(STARTMPVFORMAT)+strlen(argStr[3])+1];
 			sprintf(buff,STARTMPVFORMAT,argStr[3]);
 			system(buff);
-			// Make sure ipc server gets open by waiting for mpv
-			sleep(1);
 		}
+
+		loadRawsubs(argStr[1]);
+		
+		char _backupFilename[strlen(argStr[2])+strlen(BONUSEXTENSION)+1];
+		strcpy(_backupFilename,argStr[2]);
+		strcat(_backupFilename,BONUSEXTENSION);
+
+		if (fileExist(_backupFilename)){
+			backupFp = fopen(_backupFilename,"r");
+			int _maxReadIndex=0;
+			double _highestEnd=0;
+			while (!feof(backupFp)){
+				int _lastReadIndex;
+				double _lastReadStart;
+				double _lastReadEnd;
+				
+				fread(&(_lastReadIndex),sizeof(int),1,backupFp);
+				fread(&(_lastReadStart),sizeof(double),1,backupFp);
+				fread(&(_lastReadEnd),sizeof(double),1,backupFp);
+
+				rawStartTimes[_lastReadIndex]=_lastReadStart;
+				rawEndTimes[_lastReadIndex]=_lastReadEnd;
+
+				if (_lastReadIndex>_maxReadIndex){
+					_maxReadIndex = _lastReadIndex;
+				}
+				if (_lastReadEnd>_highestEnd){
+					_highestEnd = _lastReadEnd;
+				}
+			}
+			currentSubIndex = _maxReadIndex+1;
+			if (currentSubIndex==numRawSubs){
+				--currentSubIndex;
+			}
+
+			fclose(backupFp);
+			backupFp = fopen(_backupFilename,"a");
+
+			seekSeconds(_highestEnd);
+		}else{
+			backupFp = fopen(_backupFilename,"w");
+		}
+		outfp = fopen(argStr[2],"w");
 	}else{
 		printf("bad num args.");
 		exit(0);
@@ -319,6 +377,8 @@ void init(int numArgs, char** argStr){
 
 	#if NO_MPV
 		_startTime = testMS();
+	#else
+		waitMpvStart();
 	#endif
 }
 
@@ -380,7 +440,7 @@ int main(int numArgs, char** argStr){
 		if (_nextInput=='a'){
 			if (addingSub){
 				double _currentTime = getSeconds();
-				addSub(addSubTime,_currentTime,rawSubs[currentSubIndex]);
+				addSub(addSubTime,_currentTime);
 				addSubTime = _currentTime;
 				setLastAction("Next subtitle (a)");
 			}else{
@@ -390,15 +450,23 @@ int main(int numArgs, char** argStr){
 			}
 		}else if (_nextInput=='s'){
 			setLastAction("End subtitle");
-			addSub(addSubTime,getSeconds(),rawSubs[currentSubIndex]);
+			addSub(addSubTime,getSeconds());
 			addingSub=0;
 		}else if (_nextInput=='n'){
 			setLastAction("Next subtitle.");
 		}else if (_nextInput==KEY_END){
 			setLastAction("Quit");
 			break;
-		}else if (_nextInput=='z'){
-			setLastAction("Back");
+		}else if (_nextInput=='d'){ // Stands for "damn, I messed up"
+			if (currentSubIndex==0){
+				setLastAction("Can't go back further");
+				addingSub=0;
+			}else{
+				setLastAction("Back");
+				--currentSubIndex;
+				addingSub=1;
+				addSubTime = rawStartTimes[currentSubIndex];
+			}
 		}else if (_nextInput==KEY_LEFT){
 			seekSeconds(-1*LRSEEK);
 		}else if (_nextInput==KEY_RIGHT){
@@ -434,4 +502,10 @@ int main(int numArgs, char** argStr){
 		}
 	}
 	deinit();
+
+	printf("Writing srt...\n");
+	int i;
+	for (i=0;i<currentSubIndex;++i){
+		writeSingleSrt(i+1,rawStartTimes[i],rawEndTimes[i],rawSubs[i],outfp);
+	}
 }

@@ -1,6 +1,6 @@
 void _lowDrawDivider(int _length, int y);
 void _lowSetLastAction(char* _newMessage);
-void addSub(double startTime, double endTime, char* string);
+void addSub(double startTime, double endTime);
 void drawDivider(int y);
 void drawHalfDivider(int y);
 void drawList(char** list, int y, int numToDraw, int index, int listSize, char reverseOrder);
