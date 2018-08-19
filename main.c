@@ -11,9 +11,7 @@
 #define NO_MPV 0
 #define QUIT_MPV_ON_END 1
 
-#define COL_OLDSUB 2 // Sub has already been added
 #define COL_ADDINGSUB 1 // You've selected the sub start point
-#define COL_FUTURESUB 3
 
 ///////////////////////////////////////
 
@@ -23,6 +21,7 @@
 
 #define MPV_MESSAGE_FORMAT "echo %s | socat - "STRMLOC
 #define SEEK_FORMAT "no-osd seek %f exact"
+#define SEEK_ABSOLUTE_FORMAT "no-osd seek %f absolute"
 
 #define REDIRECTOUTPUT " > /dev/null"
 
@@ -37,7 +36,11 @@
 #define BONUSEXTENSION ".raw"
 
 #define LRSEEK 1
+#define ONETWOSEEK 3
 #define QWSEEK .5
+
+#define SEEK_STATUS_FORMAT "Seek %f"
+#define SEEK_STATUS_ABSOLUTE_FORMAT "Seek to %f"
 
 ///////////////////////////////////////
 char** rawSubs=NULL;
@@ -64,6 +67,8 @@ int listHalfDrawLength;
 char addingSub=0;
 int currentSubIndex=0;
 char isPaused=0;
+
+char canColors=0;
 ///////////////////////////////////////
 
 #if NO_MPV
@@ -132,7 +137,20 @@ void drawHalfDivider(int y){
 	_lowDrawDivider(COLS/2,y);
 }
 
-#define SEEK_STATUS_FORMAT "Seek %f"
+void seekAbsoluteSeconds(double time){
+	char buff[strlen(SEEK_STATUS_ABSOLUTE_FORMAT)+20];
+	sprintf(buff,SEEK_STATUS_ABSOLUTE_FORMAT,time);
+	setLastAction(buff);
+
+	#if NO_MPV
+		_startTime+=time;
+	#else
+		char complete[strlen(SEEK_ABSOLUTE_FORMAT)+20];
+		sprintf(complete,SEEK_ABSOLUTE_FORMAT,time);
+		sendMpvCommand(complete);
+	#endif
+}
+
 void seekSeconds(double time){
 	char buff[strlen(SEEK_STATUS_FORMAT)+20];
 	sprintf(buff,SEEK_STATUS_FORMAT,time);
@@ -141,7 +159,7 @@ void seekSeconds(double time){
 	#if NO_MPV
 		_startTime-=time*1000;
 	#else
-		char complete[strlen(SEEK_FORMAT)+3];
+		char complete[strlen(SEEK_FORMAT)+20];
 		sprintf(complete,SEEK_FORMAT,time);
 		sendMpvCommand(complete);
 	#endif
@@ -210,6 +228,9 @@ void addSub(double startTime, double endTime){
 	fwrite(&(currentSubIndex),sizeof(int),1,backupFp);
 	fwrite(&(startTime),sizeof(double),1,backupFp);
 	fwrite(&(endTime),sizeof(double),1,backupFp);
+	fflush(backupFp);
+	rawStartTimes[currentSubIndex]=startTime;
+	rawEndTimes[currentSubIndex]=endTime;
 	++currentSubIndex;
 }
 
@@ -240,11 +261,12 @@ void loadRawsubs(char* filename){
 	while (getline(&_lastLine,&_lineSize,fp)!=-1){
 		_lineSize=0;
 		numRawSubs++;
-		rawSubs = realloc(rawSubs,sizeof(char*)*numRawSubs);
+		rawSubs = realloc(rawSubs,sizeof(char*)*(numRawSubs+1));
 		removeNewline(_lastLine);
 		rawSubs[numRawSubs-1]=_lastLine;
 		_lastLine=NULL;
 	}
+	rawSubs[numRawSubs]="<end>"; // Prevent 1 overflow
 
 	rawStartTimes = calloc(1,sizeof(double)*numRawSubs);
 	rawEndTimes = calloc(1,sizeof(double)*numRawSubs);
@@ -287,6 +309,12 @@ void init(int numArgs, char** argStr){
 	if (numArgs==1){
 		outfp = fopen("./testout","w");
 		loadRawsubs("./testraw");
+
+		#if NO_MPV
+			_startTime = testMS();
+		#else
+			waitMpvStart();
+		#endif
 	}else if (numArgs>=3 && numArgs<=4){
 
 		// Start mpv
@@ -294,6 +322,7 @@ void init(int numArgs, char** argStr){
 			char buff[strlen(STARTMPVFORMAT)+strlen(argStr[3])+1];
 			sprintf(buff,STARTMPVFORMAT,argStr[3]);
 			system(buff);
+			waitMpvStart();
 		}
 
 		loadRawsubs(argStr[1]);
@@ -333,7 +362,7 @@ void init(int numArgs, char** argStr){
 			fclose(backupFp);
 			backupFp = fopen(_backupFilename,"a");
 
-			seekSeconds(_highestEnd);
+			seekAbsoluteSeconds(_highestEnd);
 		}else{
 			backupFp = fopen(_backupFilename,"w");
 		}
@@ -349,16 +378,14 @@ void init(int numArgs, char** argStr){
 	cbreak();
 	keypad(stdscr, TRUE); // Magically fix arrow keys
 	timeout(200); // Only wait 200ms for key input before redraw
-	if(has_colors() == 0){
-		endwin();
-		printf("You don't have color.\n");
-		exit(1);
+	if(has_colors()){
+		canColors=1;
 	}
 	// Init colors
-	start_color();
-	init_pair(COL_ADDINGSUB, COLOR_GREEN, COLOR_BLACK);
-	init_pair(COL_OLDSUB, COLOR_BLUE, COLOR_BLACK);
-	init_pair(COL_FUTURESUB, COLOR_YELLOW, COLOR_BLACK);
+	if (canColors){
+		start_color();
+		init_pair(COL_ADDINGSUB, COLOR_GREEN, COLOR_BLACK);
+	}
 
 	// Init positions now that we know the number of lines and stuff 
 	listDrawLength = LINES-listTopPad-listBottomPad;
@@ -374,12 +401,6 @@ void init(int numArgs, char** argStr){
 	drawCursorY = listHalfDrawLength+listTopPad;
 
 	setLastAction("Welcome");
-
-	#if NO_MPV
-		_startTime = testMS();
-	#else
-		waitMpvStart();
-	#endif
 }
 
 // <in raw subs file> <out subs file>
@@ -403,15 +424,7 @@ int main(int numArgs, char** argStr){
 		if (currentSubIndex<listHalfDrawLength){
 			drawList(rawSubs,drawCursorY-currentSubIndex,listHalfDrawLength+1+currentSubIndex,0,numRawSubs,0);
 		}else{
-			// History
-			attron(COLOR_PAIR(COL_OLDSUB));
-			drawList(rawSubs,listTopPad,listHalfDrawLength,currentSubIndex-listHalfDrawLength,numRawSubs,0);
-			attroff(COLOR_PAIR(COL_OLDSUB));
-
-			// Future
-			attron(COLOR_PAIR(COL_FUTURESUB));
-			drawList(rawSubs,listTopPad+listHalfDrawLength+1,listHalfDrawLength,currentSubIndex+1,numRawSubs,0);
-			attroff(COLOR_PAIR(COL_FUTURESUB));
+			drawList(rawSubs,listTopPad,listDrawLength,currentSubIndex-listHalfDrawLength,numRawSubs,0);
 		}
 
 		// Clear the line with our next subtitle on it because we'll do special drawing on it
@@ -420,9 +433,14 @@ int main(int numArgs, char** argStr){
 
 		move(drawCursorY,2); // It's always indented
 		if (addingSub){
-			attron(COLOR_PAIR(COL_ADDINGSUB));
-			printw(rawSubs[currentSubIndex]);
-			attroff(COLOR_PAIR(COL_ADDINGSUB));
+			if (canColors){
+				attron(COLOR_PAIR(COL_ADDINGSUB));
+				printw(rawSubs[currentSubIndex]);
+				attroff(COLOR_PAIR(COL_ADDINGSUB));
+			}else{
+				move(drawCursorY,5); // Indent more if we're not using colors
+				printw(rawSubs[currentSubIndex]);
+			}
 		}else{
 			printw(rawSubs[currentSubIndex]);
 		}
@@ -467,6 +485,8 @@ int main(int numArgs, char** argStr){
 				addingSub=1;
 				addSubTime = rawStartTimes[currentSubIndex];
 			}
+		}else if (_nextInput=='x'){ // Stands for "excape from this sub, I don't want to add it anymore!"
+			addingSub=0;
 		}else if (_nextInput==KEY_LEFT){
 			seekSeconds(-1*LRSEEK);
 		}else if (_nextInput==KEY_RIGHT){
@@ -475,10 +495,34 @@ int main(int numArgs, char** argStr){
 			seekSeconds(-1*QWSEEK);
 		}else if (_nextInput=='w'){
 			seekSeconds(QWSEEK);
+		}else if (_nextInput=='1'){
+			seekSeconds(-1*ONETWOSEEK);
+		}else if (_nextInput=='2'){
+			seekSeconds(ONETWOSEEK);
+		}else if (_nextInput=='`'){ // Seek back to previous subtitle's end or current subtitle's start
+			if (addingSub){
+				seekAbsoluteSeconds(addSubTime);
+				setLastAction("Seek to sub start");
+			}else{
+				if (currentSubIndex!=0){
+					seekAbsoluteSeconds(rawEndTimes[currentSubIndex-1]);
+
+					char bla[256];
+					sprintf(bla,"%f",rawEndTimes[currentSubIndex-1]);
+
+					setLastAction(bla);
+				}else{
+					setLastAction("Can't do that!");
+				}
+			}
 		}else if (_nextInput==' '){
 			togglePause();
 		}else if (_nextInput==ERR){
 			// No input
+		}
+
+		if (currentSubIndex==numRawSubs){
+			break;
 		}
 
 		/*
