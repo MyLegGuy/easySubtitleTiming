@@ -1,4 +1,9 @@
 //https://mpv.io/manual/master/#list-of-input-commands
+// TODO - I need a key to go back to the previous subtitle so I can change where it ends if I cut it off too early.
+	// And also the ability to go back even more.
+// TODO - Don't just write sub output as I go. This makes it hard to seek back. Instead, use arrays (rawStartTimes, rawEndTimes) to store the times and do the file writing at the end.
+	// This may be a bad idea. If the program crashes all progress is lost. Maybe I should write the timestamps to file (in my own format) just as a backup. My custom format can allow you to have multiple timestamps for one sub where whatever timestamp found in the file last is the one used, so even if I seek back and need to write a new timestamp everything's okay.
+		// This also allows me to have an easy format I can use for loading up the subs for editing again, I won't even have to me .srt parser
 
 #include <stdio.h>
 #include <string.h>
@@ -7,10 +12,12 @@
 
 #include "main.h"
 
-#define NO_MPV 1
-#define QUIT_MPV_ON_END 0
+#define NO_MPV 0
+#define QUIT_MPV_ON_END 1
 
-#define COL_ADDINGSUB 1
+#define COL_OLDSUB 2 // Sub has already been added
+#define COL_ADDINGSUB 1 // You've selected the sub start point
+#define COL_FUTURESUB 3
 
 ///////////////////////////////////////
 
@@ -23,11 +30,7 @@
 
 #define REDIRECTOUTPUT " > /dev/null"
 
-int listTopPad = 2; // title, divider
-int listBottomPad = 3; // divider, last action, timestamp
-
-int listDrawLength;
-int listHalfDrawLength;
+#define STARTMPVFORMAT "mpv --really-quiet --input-ipc-server /tmp/a --no-input-terminal "STRMLOC" %s & disown"
 
 #define DIVIDERCHAR '-'
 
@@ -35,10 +38,14 @@ int listHalfDrawLength;
 #define PAUSE_STRING "true] }\'"
 #define UNPAUSE_STRING "false] }\'"
 
+#define LRSEEK .5
+#define QWSEEK 1
+
 ///////////////////////////////////////
 char** rawSubs=NULL;
 int numRawSubs;
-double* rawTimestamps=NULL;
+double* rawStartTimes=NULL;
+double* rawEndTimes=NULL;
 
 FILE* outfp=NULL;
 
@@ -48,6 +55,12 @@ signed char _makeLengthOdd=0;
 int drawCursorY;
 
 WINDOW* mainwin;
+
+int listTopPad = 2; // title, divider
+int listBottomPad = 3; // divider, last action, timestamp
+
+int listDrawLength;
+int listHalfDrawLength;
 
 char addingSub=0;
 int currentSubIndex=0;
@@ -76,9 +89,11 @@ void togglePause(){
 	if (isPaused){
 		sendMpvCommand(PAUSE_COMMAND_SHARED UNPAUSE_STRING);
 		isPaused=0;
+		setLastAction("Unpause");
 	}else{
 		sendMpvCommand(PAUSE_COMMAND_SHARED PAUSE_STRING);
 		isPaused=1;
+		setLastAction("Pause");
 	}
 }
 
@@ -111,13 +126,13 @@ void drawHalfDivider(int y){
 
 #define SEEK_STATUS_FORMAT "Seek %f"
 void seekSeconds(double time){
+	char buff[strlen(SEEK_STATUS_FORMAT)+20];
+	sprintf(buff,SEEK_STATUS_FORMAT,time);
+	setLastAction(buff);
+
 	#if NO_MPV
 		_startTime-=time*1000;
 	#else
-		char buff[strlen(SEEK_STATUS_FORMAT)+20];
-		sprintf(buff,SEEK_STATUS_FORMAT,time);
-		setLastAction(buff);
-	
 		char complete[strlen(SEEK_FORMAT)+3];
 		sprintf(complete,SEEK_FORMAT,time);
 		sendMpvCommand(complete);
@@ -217,7 +232,8 @@ void loadRawsubs(char* filename){
 		_lastLine=NULL;
 	}
 
-	rawTimestamps = calloc(1,sizeof(double)*numRawSubs);
+	rawStartTimes = calloc(1,sizeof(double)*numRawSubs);
+	rawEndTimes = calloc(1,sizeof(double)*numRawSubs);
 	fclose(fp);
 }
 
@@ -246,9 +262,31 @@ void deinit(){
 	#endif
 }
 
-void init(){
+void init(int numArgs, char** argStr){
+	// Init mpv and subs from arguments
+	if (numArgs==1){
+		outfp = fopen("./testout","w");
+		loadRawsubs("./testraw");
+	}else if (numArgs>=3 && numArgs<=4){
+		loadRawsubs(argStr[1]);
+		
+		outfp = fopen(argStr[2],"w");
+				
+		// Start mpv
+		if (numArgs==4){
+			char buff[strlen(STARTMPVFORMAT)+strlen(argStr[3])+1];
+			sprintf(buff,STARTMPVFORMAT,argStr[3]);
+			system(buff);
+			// Make sure ipc server gets open by waiting for mpv
+			sleep(1);
+		}
+	}else{
+		printf("bad num args.");
+		exit(0);
+	}
+
 	// init curses
-	mainwin =initscr();
+	mainwin=initscr();
 	noecho();
 	cbreak();
 	keypad(stdscr, TRUE); // Magically fix arrow keys
@@ -261,6 +299,8 @@ void init(){
 	// Init colors
 	start_color();
 	init_pair(COL_ADDINGSUB, COLOR_GREEN, COLOR_BLACK);
+	init_pair(COL_OLDSUB, COLOR_BLUE, COLOR_BLACK);
+	init_pair(COL_FUTURESUB, COLOR_YELLOW, COLOR_BLACK);
 
 	// Init positions now that we know the number of lines and stuff 
 	listDrawLength = LINES-listTopPad-listBottomPad;
@@ -275,20 +315,6 @@ void init(){
 	}
 	drawCursorY = listHalfDrawLength+listTopPad;
 
-	// Init mpv and subs from arguments
-	/*
-	if (numArgs>=3 && numArgs<=4){
-		loadRawsubs(argStr[1]);
-		
-		outfp = fopen(argStr[2],"w");
-				
-		// Start mpv
-		if (numArgs==4){
-		}
-	}*/
-	outfp = fopen("./testout","w");
-	loadRawsubs("./testraw");
-
 	setLastAction("Welcome");
 
 	#if NO_MPV
@@ -298,7 +324,7 @@ void init(){
 
 // <in raw subs file> <out subs file>
 int main(int numArgs, char** argStr){
-	init();
+	init(numArgs,argStr);
 
 	double addSubTime;
 
@@ -317,7 +343,15 @@ int main(int numArgs, char** argStr){
 		if (currentSubIndex<listHalfDrawLength){
 			drawList(rawSubs,drawCursorY-currentSubIndex,listHalfDrawLength+1+currentSubIndex,0,numRawSubs,0);
 		}else{
-			drawList(rawSubs,listTopPad,listDrawLength,currentSubIndex-listHalfDrawLength,numRawSubs,0);
+			// History
+			attron(COLOR_PAIR(COL_OLDSUB));
+			drawList(rawSubs,listTopPad,listHalfDrawLength,currentSubIndex-listHalfDrawLength,numRawSubs,0);
+			attroff(COLOR_PAIR(COL_OLDSUB));
+
+			// Future
+			attron(COLOR_PAIR(COL_FUTURESUB));
+			drawList(rawSubs,listTopPad+listHalfDrawLength+1,listHalfDrawLength,currentSubIndex+1,numRawSubs,0);
+			attroff(COLOR_PAIR(COL_FUTURESUB));
 		}
 
 		// Clear the line with our next subtitle on it because we'll do special drawing on it
@@ -366,13 +400,13 @@ int main(int numArgs, char** argStr){
 		}else if (_nextInput=='z'){
 			setLastAction("Back");
 		}else if (_nextInput==KEY_LEFT){
-			seekSeconds(-1);
+			seekSeconds(-1*LRSEEK);
 		}else if (_nextInput==KEY_RIGHT){
-			seekSeconds(1);
+			seekSeconds(LRSEEK);
 		}else if (_nextInput=='q'){
-			seekSeconds(-.5);
+			seekSeconds(-1*QWSEEK);
 		}else if (_nextInput=='w'){
-			seekSeconds(.5);
+			seekSeconds(QWSEEK);
 		}else if (_nextInput==' '){
 			togglePause();
 		}else if (_nextInput==ERR){
