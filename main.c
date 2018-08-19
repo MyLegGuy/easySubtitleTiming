@@ -3,11 +3,23 @@
 #include <stdlib.h>
 #include <curses.h>
 
+//https://mpv.io/manual/master/#list-of-input-commands
+
 ///////////////////////////////////////
 
 #define STRMLOC "/tmp/a"
 #define SUBFORMATSTRING "%d\n%s --> %s\n%s\n\n"
 #define TIMEFORMAT "%02d:%02d:%02d,%03d"
+
+#define SEEK_FORMAT "echo no-osd seek %f exact | socat - "STRMLOC
+
+int listTopPad = 2; // title, divider
+int listBottomPad = 3; // divider, last action, timestamp
+
+int listDrawLength;
+int listHalfDrawLength;
+
+#define DIVIDERCHAR '-'
 
 ///////////////////////////////////////
 char** rawSubs=NULL;
@@ -16,6 +28,13 @@ int numRawSubs;
 FILE* outfp=NULL;
 
 int totalAppliedSubs=0;
+
+char* lastAction="Welcome";
+int lastActionHP=0;
+signed char _makeLengthOdd=0;
+int drawCursorY;
+
+WINDOW* mainwin;
 ///////////////////////////////////////
 
 void removeNewline(char* _toRemove){
@@ -32,8 +51,20 @@ void removeNewline(char* _toRemove){
 	}
 }
 
-#define SEEK_FORMAT "echo seek %d relative | socat - "STRMLOC
-void seekSeconds(signed int time){
+void _lowDrawDivider(int _length, int y){
+	char _buff[_length+1];
+	memset(_buff,DIVIDERCHAR,_length);
+	_buff[_length]='\0';
+	mvprintw(y,0,_buff,"%s",_buff);
+}
+void drawDivider(int y){
+	_lowDrawDivider(COLS,y);
+}
+void drawHalfDivider(int y){
+	_lowDrawDivider(COLS/2,y);
+}
+
+void seekSeconds(double time){
 	char complete[strlen(SEEK_FORMAT)+3];
 	sprintf(complete,SEEK_FORMAT,time);
 	system(complete);
@@ -88,85 +119,127 @@ void addSub(double startTime, double endTime, char* string){
 	fwrite(complete,strlen(complete),1,outfp);
 }
 
-// <in raw subs file> <out subs file>
-int main(int numArgs, char** argStr){
+void drawList(char** list, int y, int numToDraw, int index, int listSize, char reverseOrder){
+	if (index+numToDraw>listSize){
+		numToDraw = listSize-index;
+	}
+	if (index<0){
+		index=0;
+	}
+	int i;
+	if (reverseOrder){
+		for (i=0;i<numToDraw;++i){
+			mvprintw(y+numToDraw-i,1,"%s",list[i+index]);
+		}
+	}else{
+		for (i=0;i<numToDraw;++i){
+			mvprintw(y+i,1,"%s",list[i+index]);
+		}
+	}
+}
+
+void loadRawsubs(char* filename){
+	FILE* fp = fopen(filename,"r");
+	size_t _lineSize=0;
+	char* _lastLine=NULL;
+	numRawSubs=0;
+	while (getline(&_lastLine,&_lineSize,fp)!=-1){
+		_lineSize=0;
+		numRawSubs++;
+		rawSubs = realloc(rawSubs,sizeof(char*)*numRawSubs);
+		removeNewline(_lastLine);
+		rawSubs[numRawSubs-1]=_lastLine;
+		_lastLine=NULL;
+	}
+	fclose(fp);
+}
+
+void resetLastAction(){
+	lastAction="...";
+}
+
+void setLastAction(char* _newMessage){
+	lastAction = _newMessage;
+	lastActionHP = 5;
+}
+
+void init(){
 	// init curses
-	WINDOW* mainwin =initscr();
+	mainwin =initscr();
 	noecho();
 	cbreak();
+	timeout(200); // Only wait 200ms for key input before redraw
 
+	// Init positions now that we know the number of lines and stuff 
+	listDrawLength = LINES-listTopPad-listBottomPad;
+	if (listDrawLength%2==0){ // If it's even we need to do fixing because we want the cursor centered
+		listDrawLength--; // This removes two lines from the total because we recalculate listDrawLength, see below.
+		listHalfDrawLength = listDrawLength/2;
+		listDrawLength = listHalfDrawLength*2+1; // Two halves plus the cursor middle
+
+		listBottomPad++; // That extra lines we removed goes to the bottom pad
+	}else{
+		listHalfDrawLength = listDrawLength/2;
+	}
+	drawCursorY = listHalfDrawLength+listTopPad;
+
+	// Init mpv and subs from arguments
+	/*
 	if (numArgs>=3 && numArgs<=4){
-		FILE* fp = fopen(argStr[1],"r");
-		size_t _lineSize=0;
-		char* _lastLine=NULL;
-		numRawSubs=0;
-		while (getline(&_lastLine,&_lineSize,fp)!=-1){
-			_lineSize=0;
-			numRawSubs++;
-			rawSubs = realloc(rawSubs,sizeof(char*)*numRawSubs);
-			removeNewline(_lastLine);
-			rawSubs[numRawSubs-1]=_lastLine;
-			_lastLine=NULL;
-		}
-		fclose(fp);
+		loadRawsubs(argStr[1]);
 		
 		outfp = fopen(argStr[2],"w");
 				
 		// Start mpv
 		if (numArgs==4){
 		}
-	}
-	printf("%d;%d\n",COLS,LINES);
+	}*/
+	loadRawsubs("./testraw");
+}
+
+// <in raw subs file> <out subs file>
+int main(int numArgs, char** argStr){
+	init();
+
 	//double lastTime = getSeconds();
 	while (1){
-		/*
-		UI Idea:
-			-----------------
-			SUBS TO ADD (a list of the next sub you'll add, with the arrow pointing to the next one. Maybe don't show any subs that you've already added in this list because they'll be in SUB LOG)
-			-------
-			sub1
-			sub2
-		  > sub3
-			sub4
-			sub5
-			-----------------
-			SUB LOG (subs you've added)
-			-------
-			sub -3
-			sub -2
-			sub -1
-			sub 1
-			sub 2
-			-----------------
-			Last action
-			-------
-			[Append subtitle]
-			-----------------
-			Timestamp
-			-------
-			00:00:00
-			-----------------
-		*/
+		// Process
+		char _timestampBuff[strlen(TIMEFORMAT)];
+		makeTimestamp(getSeconds(),_timestampBuff);
 
+		// Draw
 		erase();
-		int i;
-		for (i=0;i<LINES;++i){
-			mvprintw(i,0,"%s:%d","bla",i);
+		///////////////
+		mvprintw(0,0,"Minimal Typesetting");
+		drawDivider(1);
+		//
+		if (totalAppliedSubs<listHalfDrawLength){
+			drawList(rawSubs,drawCursorY-totalAppliedSubs,listHalfDrawLength+1+totalAppliedSubs,0,numRawSubs,0);
+		}else{
+			drawList(rawSubs,listTopPad,listDrawLength,totalAppliedSubs-listHalfDrawLength,numRawSubs,0);
 		}
+		mvaddch(drawCursorY,0,'>');
+		//
+		drawDivider(LINES-listBottomPad);
+		mvprintw(LINES-listBottomPad+1,0,"%s",lastAction);
+		mvprintw(LINES-listBottomPad+2,0,_timestampBuff);
+		///////////////
 		refresh();
 
+		// Check inputs
 		int _nextInput = getch();
 		if (_nextInput=='a'){
-			printf("Append.\n");
+			setLastAction("Append");
+			totalAppliedSubs++;
 		}else if (_nextInput=='q'){
-			printf("Quit.\n");
+			setLastAction("Quit");
 			break;
 		}else if (_nextInput=='z'){
-			printf("undo.\n");
+			setLastAction("Back");
 		}else if (_nextInput==KEY_LEFT){
 		}else if (_nextInput==KEY_RIGHT){
 		}else if (_nextInput==ERR){
-			printf("getch error.\n");
+			// No input
 		}
 
 		/*
@@ -182,6 +255,12 @@ int main(int numArgs, char** argStr){
 			break;
 		}
 		*/
+		if (lastActionHP!=0){
+			--lastActionHP;
+			if (lastActionHP==0){
+				resetLastAction();
+			}
+		}
 	}
 	// Deinit curses
 	delwin(mainwin);
