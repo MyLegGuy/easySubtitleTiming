@@ -47,6 +47,8 @@
 #define ONETWOSEEK 3
 #define QWSEEK .5
 
+#define REACTIONTIME .4 // Amout of seconds to seek back when you press d
+
 #define SEEK_STATUS_FORMAT "Seek %f"
 #define SEEK_STATUS_ABSOLUTE_FORMAT "Seek to %f"
 
@@ -491,11 +493,11 @@ int main(int numArgs, char** argStr){
 		int _nextInput = getch();
 
 		if (_nextInput!=ERR){
-			if (_nextInput=='d'){ // Acts as if you pressed q and then a. Point is to account for human reaction time.
-				seekSeconds(-1*QWSEEK); // Do the 'q'
+			if (_nextInput=='d'){ // Seek back a bit then add the subtitle
+				seekSeconds(-1*REACTIONTIME); // Seek back a bit, account for reaction time
 				_nextInput='a'; // Trigger the 'a' input
 			}
-			if (_nextInput=='a'){ // Intentionally not else-if
+			if (_nextInput=='a'){ // Intentionally not else-if, see 'd' input code
 				if (addingSub){
 					double _currentTime = getSeconds();
 					addSub(addSubTime,_currentTime);
