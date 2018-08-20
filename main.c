@@ -15,7 +15,7 @@
 
 ///////////////////////////////////////
 
-#define STRMLOC "/tmp/a"
+#define STRMLOC "/tmp/mpvtypeset"
 #define SUBFORMATSTRING "%d\n%s --> %s\n%s\n\n"
 #define TIMEFORMAT "%02d:%02d:%02d,%03d"
 
@@ -25,7 +25,7 @@
 
 #define REDIRECTOUTPUT " > /dev/null"
 
-#define STARTMPVFORMAT "mpv --really-quiet --input-ipc-server /tmp/a --no-input-terminal "STRMLOC" %s & disown"
+#define STARTMPVFORMAT "mpv --keep-open=yes --really-quiet --input-ipc-server "STRMLOC" --no-input-terminal "STRMLOC" %s & disown"
 
 #define DIVIDERCHAR '-'
 
@@ -33,7 +33,7 @@
 #define PAUSE_STRING "true] }\'"
 #define UNPAUSE_STRING "false] }\'"
 
-#define BONUSEXTENSION ".raw"
+#define BONUSEXTENSION ".rawPos"
 
 #define LRSEEK 1
 #define ONETWOSEEK 3
@@ -304,26 +304,17 @@ void deinit(){
 	#endif
 }
 
-void init(int numArgs, char** argStr){
+char init(int numArgs, char** argStr){
 	// Init mpv and subs from arguments
-	if (numArgs==1){
-		outfp = fopen("./testout","w");
-		loadRawsubs("./testraw");
-
-		#if NO_MPV
-			_startTime = testMS();
-		#else
-			waitMpvStart();
-		#endif
-	}else if (numArgs>=3 && numArgs<=4){
-
+	if (numArgs>=3 && numArgs<=4){
 		// Start mpv
 		if (numArgs==4){
 			char buff[strlen(STARTMPVFORMAT)+strlen(argStr[3])+1];
 			sprintf(buff,STARTMPVFORMAT,argStr[3]);
 			system(buff);
-			waitMpvStart();
 		}
+		printf("Waiting for mpv with socket "STRMLOC"...");
+		waitMpvStart();
 
 		loadRawsubs(argStr[1]);
 		
@@ -369,7 +360,7 @@ void init(int numArgs, char** argStr){
 		outfp = fopen(argStr[2],"w");
 	}else{
 		printf("bad num args.");
-		exit(0);
+		return 1;
 	}
 
 	// init curses
@@ -401,11 +392,14 @@ void init(int numArgs, char** argStr){
 	drawCursorY = listHalfDrawLength+listTopPad;
 
 	setLastAction("Welcome");
+	return 0;
 }
 
 // <in raw subs file> <out subs file>
 int main(int numArgs, char** argStr){
-	init(numArgs,argStr);
+	if (init(numArgs,argStr)){
+		return 1;
+	}
 
 	double addSubTime;
 
@@ -502,15 +496,11 @@ int main(int numArgs, char** argStr){
 		}else if (_nextInput=='`'){ // Seek back to previous subtitle's end or current subtitle's start
 			if (addingSub){
 				seekAbsoluteSeconds(addSubTime);
-				setLastAction("Seek to sub start");
+				setLastAction("Seek to current sub start");
 			}else{
 				if (currentSubIndex!=0){
 					seekAbsoluteSeconds(rawEndTimes[currentSubIndex-1]);
-
-					char bla[256];
-					sprintf(bla,"%f",rawEndTimes[currentSubIndex-1]);
-
-					setLastAction(bla);
+					setLastAction("Seek to last sub's end")
 				}else{
 					setLastAction("Can't do that!");
 				}
@@ -525,19 +515,7 @@ int main(int numArgs, char** argStr){
 			break;
 		}
 
-		/*
-		if (getc(stdin)=='\n'){
-			if (currentSubIndex>=numRawSubs){
-				printf("Out of subs! %d/%d\n",currentSubIndex,numRawSubs);
-			}else{
-				double _newTime = getSeconds();
-				addSub(lastTime,_newTime,rawSubs[currentSubIndex]);
-				lastTime = _newTime;
-			}
-		}else{
-			break;
-		}
-		*/
+		// Your last action is only displayed for so long
 		if (lastActionHP!=0){
 			--lastActionHP;
 			if (lastActionHP==0){

@@ -5,7 +5,7 @@ void drawDivider(int y);
 void drawHalfDivider(int y);
 void drawList(char** list, int y, int numToDraw, int index, int listSize, char reverseOrder);
 double getSeconds();
-void init();
+char init(int numArgs, char** argStr);
 void loadRawsubs(char* filename);
 int main(int numArgs, char** argStr);
 void makeTimestamp(double time, char* buff);
