@@ -25,6 +25,9 @@
 #define SEEK_FORMAT "no-osd seek %f exact"
 #define SEEK_ABSOLUTE_FORMAT "no-osd seek %f absolute"
 
+// Actually, I think you can have blank lines.
+#define BLANKLINEREPLACEMENT ""
+
 #define REDIRECTOUTPUT " > /dev/null"
 
 #define STARTMPVFORMAT "mpv --keep-open=yes --really-quiet --input-ipc-server "STRMLOC" --no-input-terminal "STRMLOC" %s & disown"
@@ -79,6 +82,16 @@ char* rawSubInFilename=NULL;
 char* srtOutFilename=NULL;
 char* rawOutFilename=NULL;
 ///////////////////////////////////////
+
+// Not for curses
+// getc but it ignores newline character
+int goodGetC(FILE* fp){
+	int _answer;
+	do{
+		_answer = getc(stdin);
+	}while(_answer==10);
+	return _answer;
+}
 
 #if NO_MPV
 	#include <time.h>
@@ -222,8 +235,12 @@ void writeSingleSrt(int index, double startTime, double endTime, char* string, F
 	makeTimestamp(startTime,strstampone);
 	makeTimestamp(endTime,strstamptwo);
 
+	if (strlen(string)==0){ // Can't write blank lines
+		string = BLANKLINEREPLACEMENT;
+	}
+
 	char complete[strlen(SUBFORMATSTRING)+strlen(strstampone)+strlen(string)+strlen(strstamptwo)+1];
-	sprintf(complete,SUBFORMATSTRING,currentSubIndex,strstampone,strstamptwo,string);
+	sprintf(complete,SUBFORMATSTRING,index,strstampone,strstamptwo,string);
 
 	fwrite(complete,strlen(complete),1,fp);
 }
@@ -362,7 +379,15 @@ char init(int numArgs, char** argStr){
 			}
 			currentSubIndex = _maxReadIndex+1;
 			if (currentSubIndex==numRawSubs){
-				--currentSubIndex;
+				printf("This sub project is already complete.\nWhat would you like to do?\n---\n1 - Reopen this project, but discard the typesetting for the last subtitle.\n2 - Reopen this project, but just regenerate the srt and mka.\n3 - Exit without doing anything.\n---\n");
+				int _answer = goodGetC(stdin);
+				if (_answer=='1'){
+					currentSubIndex--; // Discard last sub
+				}else if (_answer=='2'){
+					// Leave it as is, it'll automaticlly break from the main loop
+				}else{
+					return 1; // Exit
+				}
 			}
 
 			fclose(backupFp);
@@ -373,7 +398,7 @@ char init(int numArgs, char** argStr){
 			backupFp = fopen(rawOutFilename,"w");
 		}
 	}else{
-		printf("bad num args.");
+		printf("bad num args.\n");
 		printf("./a.out <plaintext subs> <srt output filename> [audio file]\n");
 		return 1;
 	}
@@ -419,7 +444,7 @@ int main(int numArgs, char** argStr){
 	double addSubTime;
 
 	//double lastTime = getSeconds();
-	while (1){
+	while (currentSubIndex!=numRawSubs){
 		// Process
 		char _timestampBuff[strlen(TIMEFORMAT)];
 		makeTimestamp(getSeconds(),_timestampBuff);
@@ -529,11 +554,6 @@ int main(int numArgs, char** argStr){
 			}
 		}
 
-		//
-		// Quit if we're now on the last sub. If we don't exit now we'll crash later trying to draw too far in the array
-		if (currentSubIndex==numRawSubs){
-			break;
-		}
 		// Your last action is only displayed for so long
 		if (lastActionHP!=0){
 			--lastActionHP;
@@ -544,6 +564,8 @@ int main(int numArgs, char** argStr){
 	}
 	deinit();
 
+	fclose(backupFp);
+
 	//
 	printf("Writing srt...\n");
 	FILE* outfp = fopen(srtOutFilename,"w");
@@ -551,12 +573,13 @@ int main(int numArgs, char** argStr){
 	for (i=0;i<currentSubIndex;++i){
 		writeSingleSrt(i+1,rawStartTimes[i],rawEndTimes[i],rawSubs[i],outfp);
 	}
+	fclose(outfp);
 
 	//
 	#if CREATE_MKA_ON_END
 		if (audioFilename!=NULL){
 			printf("Make mka file to package audio and subs?\n(y/n): ");
-			int _answer = getc(stdin);
+			int _answer = goodGetC(stdin);
 			if (_answer=='Y' || _answer=='y'){
 				char mkaOutFilename[strlen(audioFilename)+strlen(".mka")+1];
 				strcpy(mkaOutFilename,audioFilename);
@@ -564,7 +587,8 @@ int main(int numArgs, char** argStr){
 
 				char buff[strlen(MAKEMKACOMMAND)+strlen(audioFilename)+strlen(srtOutFilename)+strlen(mkaOutFilename)+1];
 				sprintf(buff,MAKEMKACOMMAND,mkaOutFilename,audioFilename,srtOutFilename);
-
+				
+				printf("%s\n",buff);
 				system(buff);
 			}
 		}
