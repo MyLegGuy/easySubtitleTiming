@@ -10,7 +10,9 @@
 
 #define NO_MPV 0
 #define QUIT_MPV_ON_END 1
+#define CREATE_MKA_ON_END 1
 
+// Color indices
 #define COL_ADDINGSUB 1 // You've selected the sub start point
 
 ///////////////////////////////////////
@@ -26,6 +28,9 @@
 #define REDIRECTOUTPUT " > /dev/null"
 
 #define STARTMPVFORMAT "mpv --keep-open=yes --really-quiet --input-ipc-server "STRMLOC" --no-input-terminal "STRMLOC" %s & disown"
+
+// output mka, in audio file, in sub file
+#define MAKEMKACOMMAND "mkvmerge -o %s %s %s"
 
 #define DIVIDERCHAR '-'
 
@@ -48,7 +53,6 @@ int numRawSubs;
 double* rawStartTimes=NULL;
 double* rawEndTimes=NULL;
 
-FILE* outfp=NULL;
 FILE* backupFp=NULL;
 
 char* lastAction=NULL;
@@ -69,6 +73,11 @@ int currentSubIndex=0;
 char isPaused=0;
 
 char canColors=0;
+
+char* audioFilename=NULL;
+char* rawSubInFilename=NULL;
+char* srtOutFilename=NULL;
+char* rawOutFilename=NULL;
 ///////////////////////////////////////
 
 #if NO_MPV
@@ -304,26 +313,32 @@ void deinit(){
 	#endif
 }
 
+// 
 char init(int numArgs, char** argStr){
 	// Init mpv and subs from arguments
 	if (numArgs>=3 && numArgs<=4){
+		srtOutFilename = strdup(argStr[2]);
+		rawOutFilename = malloc(strlen(srtOutFilename)+strlen(BONUSEXTENSION)+1);
+			strcpy(rawOutFilename,srtOutFilename);
+			strcat(rawOutFilename,BONUSEXTENSION);
+		rawSubInFilename = strdup(argStr[1]);
+
 		// Start mpv
 		if (numArgs==4){
 			char buff[strlen(STARTMPVFORMAT)+strlen(argStr[3])+1];
 			sprintf(buff,STARTMPVFORMAT,argStr[3]);
 			system(buff);
+
+			audioFilename = strdup(argStr[3]);
 		}
 		printf("Waiting for mpv with socket "STRMLOC"...");
 		waitMpvStart();
 
-		loadRawsubs(argStr[1]);
-		
-		char _backupFilename[strlen(argStr[2])+strlen(BONUSEXTENSION)+1];
-		strcpy(_backupFilename,argStr[2]);
-		strcat(_backupFilename,BONUSEXTENSION);
+		loadRawsubs(rawSubInFilename);
 
-		if (fileExist(_backupFilename)){
-			backupFp = fopen(_backupFilename,"r");
+		// If the raw output subs already exist, load them up.
+		if (fileExist(rawOutFilename)){
+			backupFp = fopen(rawOutFilename,"r");
 			int _maxReadIndex=0;
 			double _highestEnd=0;
 			while (!feof(backupFp)){
@@ -351,15 +366,15 @@ char init(int numArgs, char** argStr){
 			}
 
 			fclose(backupFp);
-			backupFp = fopen(_backupFilename,"a");
+			backupFp = fopen(rawOutFilename,"a");
 
 			seekAbsoluteSeconds(_highestEnd);
 		}else{
-			backupFp = fopen(_backupFilename,"w");
+			backupFp = fopen(rawOutFilename,"w");
 		}
-		outfp = fopen(argStr[2],"w");
 	}else{
 		printf("bad num args.");
+		printf("./a.out <plaintext subs> <srt output filename> [audio file]\n");
 		return 1;
 	}
 
@@ -449,72 +464,76 @@ int main(int numArgs, char** argStr){
 
 		// Check inputs
 		int _nextInput = getch();
-		if (_nextInput=='a'){
-			if (addingSub){
-				double _currentTime = getSeconds();
-				addSub(addSubTime,_currentTime);
-				addSubTime = _currentTime;
-				setLastAction("Next subtitle (a)");
-			}else{
-				setLastAction("Start subtitle");
-				addingSub=1;
-				addSubTime = getSeconds();
+
+		if (_nextInput!=ERR){
+			if (_nextInput=='d'){ // Acts as if you pressed q and then a. Point is to account for human reaction time.
+				seekSeconds(-1*QWSEEK); // Do the 'q'
+				_nextInput='a'; // Trigger the 'a' input
 			}
-		}else if (_nextInput=='s'){
-			setLastAction("End subtitle");
-			addSub(addSubTime,getSeconds());
-			addingSub=0;
-		}else if (_nextInput=='n'){
-			setLastAction("Next subtitle.");
-		}else if (_nextInput==KEY_END){
-			setLastAction("Quit");
-			break;
-		}else if (_nextInput=='d'){ // Stands for "damn, I messed up"
-			if (currentSubIndex==0){
-				setLastAction("Can't go back further");
-				addingSub=0;
-			}else{
-				setLastAction("Back");
-				--currentSubIndex;
-				addingSub=1;
-				addSubTime = rawStartTimes[currentSubIndex];
-			}
-		}else if (_nextInput=='x'){ // Stands for "excape from this sub, I don't want to add it anymore!"
-			addingSub=0;
-		}else if (_nextInput==KEY_LEFT){
-			seekSeconds(-1*LRSEEK);
-		}else if (_nextInput==KEY_RIGHT){
-			seekSeconds(LRSEEK);
-		}else if (_nextInput=='q'){
-			seekSeconds(-1*QWSEEK);
-		}else if (_nextInput=='w'){
-			seekSeconds(QWSEEK);
-		}else if (_nextInput=='1'){
-			seekSeconds(-1*ONETWOSEEK);
-		}else if (_nextInput=='2'){
-			seekSeconds(ONETWOSEEK);
-		}else if (_nextInput=='`'){ // Seek back to previous subtitle's end or current subtitle's start
-			if (addingSub){
-				seekAbsoluteSeconds(addSubTime);
-				setLastAction("Seek to current sub start");
-			}else{
-				if (currentSubIndex!=0){
-					seekAbsoluteSeconds(rawEndTimes[currentSubIndex-1]);
-					setLastAction("Seek to last sub's end")
+			if (_nextInput=='a'){ // Intentionally not else-if
+				if (addingSub){
+					double _currentTime = getSeconds();
+					addSub(addSubTime,_currentTime);
+					addSubTime = _currentTime;
+					setLastAction("Next subtitle (a)");
 				}else{
-					setLastAction("Can't do that!");
+					setLastAction("Start subtitle");
+					addingSub=1;
+					addSubTime = getSeconds();
+				}
+			}else if (_nextInput=='s'){
+				setLastAction("End subtitle");
+				addSub(addSubTime,getSeconds());
+				addingSub=0;
+			}else if (_nextInput=='z'){ // Like ^Z
+				if (currentSubIndex==0){
+					setLastAction("Can't go back further");
+					addingSub=0;
+				}else{
+					setLastAction("Back");
+					--currentSubIndex;
+					addingSub=1;
+					addSubTime = rawStartTimes[currentSubIndex];
+				}
+			}else if (_nextInput=='x'){ // Stands for "excape from this sub, I don't want to add it anymore!"
+				addingSub=0;
+			}else if (_nextInput==' '){
+				togglePause();
+			}else if (_nextInput==KEY_END){
+				setLastAction("Quit");
+				break;
+			}else if (_nextInput==KEY_LEFT){
+				seekSeconds(-1*LRSEEK);
+			}else if (_nextInput==KEY_RIGHT){
+				seekSeconds(LRSEEK);
+			}else if (_nextInput=='q'){
+				seekSeconds(-1*QWSEEK);
+			}else if (_nextInput=='w'){
+				seekSeconds(QWSEEK);
+			}else if (_nextInput=='1'){
+				seekSeconds(-1*ONETWOSEEK);
+			}else if (_nextInput=='2'){
+				seekSeconds(ONETWOSEEK);
+			}else if (_nextInput=='`'){ // Seek back to previous subtitle's end or current subtitle's start
+				if (addingSub){
+					seekAbsoluteSeconds(addSubTime);
+					setLastAction("Seek to current sub start");
+				}else{
+					if (currentSubIndex!=0){
+						seekAbsoluteSeconds(rawEndTimes[currentSubIndex-1]);
+						setLastAction("Seek to last sub's end");
+					}else{
+						setLastAction("Can't do that!");
+					}
 				}
 			}
-		}else if (_nextInput==' '){
-			togglePause();
-		}else if (_nextInput==ERR){
-			// No input
 		}
 
+		//
+		// Quit if we're now on the last sub. If we don't exit now we'll crash later trying to draw too far in the array
 		if (currentSubIndex==numRawSubs){
 			break;
 		}
-
 		// Your last action is only displayed for so long
 		if (lastActionHP!=0){
 			--lastActionHP;
@@ -525,9 +544,29 @@ int main(int numArgs, char** argStr){
 	}
 	deinit();
 
+	//
 	printf("Writing srt...\n");
+	FILE* outfp = fopen(srtOutFilename,"w");
 	int i;
 	for (i=0;i<currentSubIndex;++i){
 		writeSingleSrt(i+1,rawStartTimes[i],rawEndTimes[i],rawSubs[i],outfp);
 	}
+
+	//
+	#if CREATE_MKA_ON_END
+		if (audioFilename!=NULL){
+			printf("Make mka file to package audio and subs?\n(y/n): ");
+			int _answer = getc(stdin);
+			if (_answer=='Y' || _answer=='y'){
+				char mkaOutFilename[strlen(audioFilename)+strlen(".mka")+1];
+				strcpy(mkaOutFilename,audioFilename);
+				strcat(mkaOutFilename,".mka");
+
+				char buff[strlen(MAKEMKACOMMAND)+strlen(audioFilename)+strlen(srtOutFilename)+strlen(mkaOutFilename)+1];
+				sprintf(buff,MAKEMKACOMMAND,mkaOutFilename,audioFilename,srtOutFilename);
+
+				system(buff);
+			}
+		}
+	#endif
 }
