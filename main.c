@@ -550,7 +550,8 @@ int main(int numArgs, char** argStr){
 						seekAbsoluteSeconds(rawEndTimes[currentSubIndex-1]);
 						setLastAction("Seek to last sub's end");
 					}else{
-						setLastAction("Can't do that!");
+						seekAbsoluteSeconds(0);
+						setLastAction("Seek to start.");
 					}
 				}
 			}
