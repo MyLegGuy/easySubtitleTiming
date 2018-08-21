@@ -1,1 +1,1 @@
-gcc -lcurses -Wall main.c
+cc -lcurses -Wall main.c
