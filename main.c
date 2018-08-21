@@ -165,9 +165,8 @@ FILE* sendMpvCommand(char* msg, char _getOutput){
 
 void togglePause(){
 	char dresult[256];
-	dresult[0]='\0';
 	FILE* fp = sendMpvCommand(GET_PAUSE_STATUS_COMMAND,1);
-	fread(dresult,sizeof(dresult),1,fp);
+	dresult[fread(dresult,sizeof(dresult),1,fp)]='\0';
 	fclose(fp);
 	if (strstr(dresult,"success")!=NULL){
 		if (strstr(dresult,"true")!=NULL){
@@ -241,9 +240,8 @@ double getSeconds(){
 	#else
 		// Step 1 - Get the info from mpv
 		char dresult[256];
-		dresult[0]='\0';
 		FILE* fp = sendMpvCommand(GET_SECONDS_COMMAND,1);
-		fread(dresult,sizeof(dresult),1,fp);
+		dresult[fread(dresult,sizeof(dresult),1,fp)]='\0';
 		fclose(fp);
 		if (strstr(dresult,"success")==NULL){
 			return -1;
