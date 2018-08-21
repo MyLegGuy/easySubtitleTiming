@@ -590,7 +590,7 @@ char init(int numArgs, char** argStr){
 		}
 	}else{
 		printf("bad num args.\n");
-		printf("./a.out <plaintext subs> <srt output filename> [audio file]\n");
+		printf("%s <plaintext subs> <srt output filename> [audio file]\n",argStr[0]);
 		return 1;
 	}
 
@@ -624,6 +624,7 @@ char init(int numArgs, char** argStr){
 
 	setLastAction("Welcome");
 
+	// Keybindings
 	// Sub keybinds
 	bindKey('a',keyAddSub);
 	bindKey('d',keyReactAddSub);
