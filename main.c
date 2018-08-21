@@ -461,7 +461,6 @@ void runKeyFunc(int key){
 	}
 }
 
-
 //
 void deinit(){
 	// Deinit curses
@@ -578,13 +577,6 @@ char init(int numArgs, char** argStr){
 	drawCursorY = listHalfDrawLength+listTopPad;
 
 	setLastAction("Welcome");
-	return 0;
-}
-
-int main(int numArgs, char** argStr){
-	if (init(numArgs,argStr)){
-		return 1;
-	}
 
 	// Sub keybinds
 	bindKey('a',keyAddSub);
@@ -603,6 +595,13 @@ int main(int numArgs, char** argStr){
 	bindKey('`',keySeekPrevEnd);
 	bindKey(KEY_END,keyQuit);
 	bindKey(' ',keyPause);
+	return 0;
+}
+
+int main(int numArgs, char** argStr){
+	if (init(numArgs,argStr)){
+		return 1;
+	}
 
 	while (currentSubIndex!=numRawSubs && running){
 		// Process
