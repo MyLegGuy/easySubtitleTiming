@@ -25,6 +25,7 @@ void keyPause();
 void keyQuit();
 void keyReactAddSub();
 void keyResetSub();
+void keySeekPrevEndAndAdd();
 void keySeekPrevEnd();
 void loadRawsubs(char* filename);
 int main(int numArgs, char** argStr);

@@ -1,6 +1,5 @@
 // todo - scrollbar
 // todo - proper pausing
-// todo - '~' keystroke
 
 #include <stdio.h>
 #include <string.h>
@@ -70,6 +69,9 @@
 #define QUIT_MPV_ON_END 1
 // If it asking you at the end every time is annoying
 #define CREATE_MKA_ON_END 1
+
+// How many loops the message showing your last action lasts
+#define REGULARACTIONHP 5
 
 ///////////////////////////////////////
 
@@ -270,7 +272,7 @@ void writeSingleSrt(int index, double startTime, double endTime, char* string, F
 //
 void addSub(double startTime, double endTime){
 	if (currentSubIndex==numRawSubs){
-		setLastAction("None left.");
+		setLastAction("None left");
 		return;
 	}
 	//_lowAddSub(currentSubIndex+1,startTime,endTime,rawSubs[currentSubIndex]);
@@ -333,7 +335,7 @@ void resetLastAction(){
 
 void setLastAction(char* _newMessage){
 	_lowSetLastAction(_newMessage);
-	lastActionHP = 5;
+	lastActionHP = REGULARACTIONHP;
 }
 
 void waitMpvStart(){
@@ -350,6 +352,17 @@ void keyReactAddSub(){
 	setLastAction("Start subtitle with reaction time");
 }
 
+// Seek to the previous subtitle's end point and set that as the current sub's start point. Your current start point will be discarded if set.
+void keySeekPrevEndAndAdd(){
+	// Discard old start point
+	addingSub=0;
+
+	keySeekPrevEnd();
+	keyAddSub();
+
+	setLastAction("Seek to last sub's end and add");
+}
+
 // Seek to the end point of last sub
 void keySeekPrevEnd(){
 	if (addingSub){
@@ -361,7 +374,7 @@ void keySeekPrevEnd(){
 			setLastAction("Seek to last sub's end");
 		}else{
 			seekAbsoluteSeconds(0);
-			setLastAction("Seek to start.");
+			setLastAction("Seek to start");
 		}
 	}
 }
@@ -423,7 +436,7 @@ void keyEndSub(){
 		addSub(addSubTime,getSeconds());
 		addingSub=0;
 	}else{
-		setLastAction("Can't set sub end point before start point.");
+		setLastAction("Can't set sub end point before start point");
 	}
 }
 
@@ -451,6 +464,7 @@ void bindKey(int key, keyFunc toBind){
 	boundFuncs[totalKeysBound-1] = toBind;
 }
 
+// Please only use this with keys the user inputs. Do not hard code key names.
 void runKeyFunc(int key){
 	int i;
 	for (i=0;i<totalKeysBound;++i){
@@ -493,7 +507,7 @@ char init(int numArgs, char** argStr){
 
 			audioFilename = strdup(argStr[3]);
 		}
-		printf("Waiting for mpv with socket "STRMLOC"...");
+		printf("Waiting for mpv with --input-ipc-server "STRMLOC"...\n");
 		waitMpvStart();
 
 		loadRawsubs(rawSubInFilename);
@@ -591,10 +605,12 @@ char init(int numArgs, char** argStr){
 	bindKey('w',keyMiniSeek);
 	bindKey('1',keyNormSeekBack);
 	bindKey('2',keyNormSeek);
-	// Other keybinds
 	bindKey('`',keySeekPrevEnd);
+	// Other keybinds
+	bindKey('~',keySeekPrevEndAndAdd);
 	bindKey(KEY_END,keyQuit);
 	bindKey(' ',keyPause);
+
 	return 0;
 }
 
@@ -660,7 +676,7 @@ int main(int numArgs, char** argStr){
 			}
 		}
 	}
-	deinit();
+	
 
 	//
 	printf("Writing srt...\n");
@@ -674,9 +690,20 @@ int main(int numArgs, char** argStr){
 	//
 	#if CREATE_MKA_ON_END
 		if (audioFilename!=NULL){
-			printf("Make mka file to package audio and subs?\n(y/n): ");
-			int _answer = goodGetC(stdin);
-			if (_answer=='Y' || _answer=='y'){
+			// Visual prompt
+			erase();
+			mvprintw(0,0,"Make mka file to package audio and subs? (y/n)");
+			move(1,0);
+			refresh();
+			// Get key
+			int _nextInput;
+			do{
+				_nextInput = getch();
+			}while(_nextInput==ERR);
+			// We don't need curses anymore
+			deinit();
+			// Do
+			if (_nextInput=='Y' || _nextInput=='y'){
 				char mkaOutFilename[strlen(audioFilename)+strlen(".mka")+1];
 				strcpy(mkaOutFilename,audioFilename);
 				strcat(mkaOutFilename,".mka");
@@ -688,5 +715,7 @@ int main(int numArgs, char** argStr){
 				system(buff);
 			}
 		}
+	#else
+		deinit();
 	#endif
 }
