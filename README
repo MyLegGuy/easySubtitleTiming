@@ -1,0 +1,64 @@
+Minimalist typesetting software for Linux.
+
+How this works:
+	This is for adding subtitles to media.
+	You have a file that is a list of subtitles. Each line has one subtitle/sentence.
+	You also have a media file that can be played with mpv. This was originally made to be used with audio files, but it works with anything mpv can use, like video.
+	The UI just shows you the timestamp in the media, and your list of subtitles. As you add subtitles the list scrolls.
+	The way you use this is by setting subtitle start and end points one by one as the media plays. The point is to listen to the media as press the subtitle adding keys as you hear the dialogue.
+
+How to compile:
+	The build command is in the file ./build. Just make it executable by doing "chmod +x ./build". And execute with "./build".
+	Dependencies:
+		* -l curses
+		 * socat (runtime)
+		 * mpv (runtime)
+		 * mkvmerge (runtime, optional. For making MKA files)
+		 * (Optional) Terminal with color
+
+Running:
+	./a.out <raw, plaintext subtitle file> <output .srt filename> [media filename]
+
+Default color meanings:
+	White: Normal
+	White and indented: The next subtitle you will add.
+	Green and indented: You've set the start point for this subtitle, the program is waiting for the end point.
+
+Default keybindings:
+		These default bindings were created so you only use your left hand. Capitalization matters.
+		-- Keybindings for dealing with subtitles --
+		'a' - Set the start point for your current subtitle.
+		'd' - Seek back the reaction time (by default .4 seconds) and then set the start point for your current subtitle. The point of this is for you to press this key right when you hear the next line if dialogue.
+		's' - Set the end point for your current subtitle and advance to the next one.
+		'z' - Deletes the last subtitle's endpoint (and discards the current subtitle's start point if it exists). Use this key if you messed up the last subtitle.
+		'x' - Delete the current subtitle's start point. If you start a sub too early or late, use this key. If you press 'z' and then this key, you can completely undo the last subtitle.
+		-- Keybindings for seeking --
+		'q' - Seek back a little bit. By default .5 seconds.
+			'w' - Same as 'q' but forward.
+		'1' - Seek back a normal amount. By default 1 second.
+			'2' - Same as '1' but forward.
+		KEY_LEFT - Seek back a lot. By default 3 seconds.
+				 KEY_RIGHT - Same as KEY_LEFT but forward.
+		'`' - If you've already set your current subtitle's start point, seek there. If you haven't, seek to the previous subtitle's end point.
+		-- Etc --
+		'~' - Seek to the last subtitle's end point and sets your current subtitle's start point there.
+		'KEY_END' - Save and quit
+		' ' - (Spacebar) - Toggle pause.
+
+Customization:
+	You have to edit the source code manually.
+	To edit seek amounts in seconds, look for
+	   #define MINISEEK .5 // How much you seek when you press the convenient seeking keys. (by default 'q' and 'w')
+	   #define NORMSEEK 1 // How much you seek when you press the slightly inconvenient seeking keys. (by default '1' and '2')
+	   #define MEGASEEK 3 // How much you seek when you press the inconvenient seeking keys. (by default arrow keys)
+	   #define REACTIONTIME .4 // How much you seek back when you press the reaction add sub key. (by default 'd')
+	To edit the keybindings, search the file for a block of code like this:
+	   		// Keybindings
+	   		bindKey('a',keyAddSub);
+			(...)
+		Keybindings can easily be changed by modifying bindKey function calls. If you code your own functions they can be added the same way.
+
+
+About project files...
+	  To keep things more simple, this program has no support for actually reading completed .SRT subtitle files. That doesn't mean you can't quit and resume work later, though. As you add subtitles, their timing is directly saved into a file with the ".rawPos" extension (as defined by BONUSEXTENSION). The filename is the same as what you passed as the SRT output filename, just with ".rawPos" added to the end. When starting up the program it will check for a ".rawPos" file. If it exists it'll load it and allow you to continue from where you were before. As long as you have the ".rawPos" file, you can continue editing or recreate the SRT file.
+	  ** If you add additional lines to your raw, plaintext subtitle list file to anywhere __except the end__ then your ".rawPos" file may not work anymore. Editing the words themselves is fine, as long as no new lines are added. **
