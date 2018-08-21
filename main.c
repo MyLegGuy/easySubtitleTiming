@@ -1,4 +1,6 @@
-//https://mpv.io/manual/master/#list-of-input-commands
+// todo - scrollbar
+// todo - proper pausing
+// todo - '~' keystroke
 
 #include <stdio.h>
 #include <string.h>
@@ -8,92 +10,106 @@
 
 #include "main.h"
 
+// For testing
 #define NO_MPV 0
-#define QUIT_MPV_ON_END 1
-#define CREATE_MKA_ON_END 1
 
 // Color indices
 #define COL_ADDINGSUB 1 // You've selected the sub start point
 
 ///////////////////////////////////////
+//https://mpv.io/manual/master/#list-of-input-commands
 
+// The application should have access to this file
 #define STRMLOC "/tmp/mpvtypeset"
+
+// Defined for the srt file format
 #define SUBFORMATSTRING "%d\n%s --> %s\n%s\n\n"
 #define TIMEFORMAT "%02d:%02d:%02d,%03d"
 
+// How messages are sent to mpv, change this to use something other than socat.
 #define MPV_MESSAGE_FORMAT "echo %s | socat - "STRMLOC
+
+// Seek commands sent to mpv
 #define SEEK_FORMAT "no-osd seek %f exact"
 #define SEEK_ABSOLUTE_FORMAT "no-osd seek %f absolute"
+
+// Part 1 of the pause command sent to mpv
+#define PAUSE_COMMAND_SHARED "\'{ \"command\": [\"set_property\", \"pause\", "
+// Different ends depending on if you're pausing or unpausing
+#define PAUSE_STRING "true] }\'"
+#define UNPAUSE_STRING "false] }\'"
 
 // Actually, I think you can have blank lines.
 #define BLANKLINEREPLACEMENT ""
 
+// This is appended to some commands to prevent their output messing with curses
 #define REDIRECTOUTPUT " > /dev/null"
 
+//
 #define STARTMPVFORMAT "mpv --keep-open=yes --really-quiet --input-ipc-server "STRMLOC" --no-input-terminal "STRMLOC" %s & disown"
 
 // output mka, in audio file, in sub file
 #define MAKEMKACOMMAND "mkvmerge -o %s %s %s"
 
+// For UI, what the dividers are made of
 #define DIVIDERCHAR '-'
 
-#define PAUSE_COMMAND_SHARED "\'{ \"command\": [\"set_property\", \"pause\", "
-#define PAUSE_STRING "true] }\'"
-#define UNPAUSE_STRING "false] }\'"
-
+// File extension for project files
 #define BONUSEXTENSION ".rawPos"
 
-#define LRSEEK 1
-#define ONETWOSEEK 3
-#define QWSEEK .5
+// In seconds
+#define NORMSEEK 1 // Normal
+#define MEGASEEK 3
+#define MINISEEK .5
+#define REACTIONTIME .4 // Amount of seconds to seek back when you press d
 
-#define REACTIONTIME .4 // Amout of seconds to seek back when you press d
-
+// Not the command, but what the user sees as their action
 #define SEEK_STATUS_FORMAT "Seek %f"
 #define SEEK_STATUS_ABSOLUTE_FORMAT "Seek to %f"
 
+#define QUIT_MPV_ON_END 1
+// If it asking you at the end every time is annoying
+#define CREATE_MKA_ON_END 1
+
 ///////////////////////////////////////
-char** rawSubs=NULL;
-int numRawSubs;
-double* rawStartTimes=NULL;
-double* rawEndTimes=NULL;
 
-FILE* backupFp=NULL;
-
-char* lastAction=NULL;
-int lastActionHP=0;
-signed char _makeLengthOdd=0;
-int drawCursorY;
-
-WINDOW* mainwin;
-
-int listTopPad = 2; // title, divider
-int listBottomPad = 3; // divider, last action, timestamp
-
-int listDrawLength;
-int listHalfDrawLength;
-
-char addingSub=0;
-int currentSubIndex=0;
-char isPaused=0;
-
-char canColors=0;
-
+// Arg and filename
 char* audioFilename=NULL;
 char* rawSubInFilename=NULL;
 char* srtOutFilename=NULL;
 char* rawOutFilename=NULL;
-///////////////////////////////////////
+FILE* backupFp=NULL;
 
-// Not for curses
-// getc but it ignores newline character
-int goodGetC(FILE* fp){
-	int _answer;
-	do{
-		_answer = getc(stdin);
-	}while(_answer==10);
-	return _answer;
-}
+// List
+int numRawSubs;
+char** rawSubs=NULL;
+double* rawStartTimes=NULL;
+double* rawEndTimes=NULL;
+
+// curses
+WINDOW* mainwin;
+char canColors=0;
+
+// UI
+int listTopPad = 2; // title, divider
+int listBottomPad = 3; // divider, last action, timestamp
+int listDrawLength;
+int listHalfDrawLength;
+int drawCursorY;
+int totalKeysBound=0;
+keyFunc* boundFuncs=NULL;
+int* boundKeys=NULL;
+
+// Dynamic
+char addingSub=0;
+int currentSubIndex=0;
+char isPaused=0;
+char* lastAction=NULL;
+int lastActionHP=0;
+double addSubTime; // Timestamp where you start adding the current subtitle
+char running=1;
+
+///////////////////////////////////////
 
 #if NO_MPV
 	#include <time.h>
@@ -104,6 +120,16 @@ int goodGetC(FILE* fp){
 		return _myTime.tv_nsec/1000000+_myTime.tv_sec*1000;
 	}
 #endif
+
+// Not for curses
+// getc but it ignores newline character
+int goodGetC(FILE* fp){
+	int _answer;
+	do{
+		_answer = getc(stdin);
+	}while(_answer==10);
+	return _answer;
+}
 
 char fileExist(char* filename){
 	FILE* fp = fopen(filename,"r");
@@ -120,7 +146,6 @@ void sendMpvCommand(char* msg){
 	strcat(buff,REDIRECTOUTPUT); // Apply output redirection
 	system(buff);
 }
-
 
 void togglePause(){
 	if (isPaused){
@@ -174,7 +199,6 @@ void seekAbsoluteSeconds(double time){
 		sendMpvCommand(complete);
 	#endif
 }
-
 void seekSeconds(double time){
 	char buff[strlen(SEEK_STATUS_FORMAT)+20];
 	sprintf(buff,SEEK_STATUS_FORMAT,time);
@@ -188,7 +212,6 @@ void seekSeconds(double time){
 		sendMpvCommand(complete);
 	#endif
 }
-
 double getSeconds(){
 	#if NO_MPV
 		return (testMS()-_startTime)/(double)1000;
@@ -211,7 +234,6 @@ double getSeconds(){
 		return atof(numStart);
 	#endif
 }
-
 int secToMilli(double time){
 	return (time-(int)time)*1000;
 }
@@ -224,7 +246,6 @@ int secToMin(double time){
 int secToHour(double time){
 	return (int)time/60/60;
 }
-
 void makeTimestamp(double time, char* buff){
 	sprintf(buff,TIMEFORMAT,secToHour(time),secToMin(time),secToSec(time),secToMilli(time));
 }
@@ -321,18 +342,141 @@ void waitMpvStart(){
 	}
 }
 
+//////////////////////////////////
+
+void keyReactAddSub(){
+	seekSeconds(-1*REACTIONTIME); // Seek back a bit, account for reaction time
+	keyAddSub();
+	setLastAction("Start subtitle with reaction time");
+}
+
+// Seek to the end point of last sub
+void keySeekPrevEnd(){
+	if (addingSub){
+		seekAbsoluteSeconds(addSubTime);
+		setLastAction("Seek to current sub start");
+	}else{
+		if (currentSubIndex!=0){
+			seekAbsoluteSeconds(rawEndTimes[currentSubIndex-1]);
+			setLastAction("Seek to last sub's end");
+		}else{
+			seekAbsoluteSeconds(0);
+			setLastAction("Seek to start.");
+		}
+	}
+}
+
+void keyMegaSeekBack(){
+	seekSeconds(-1*MEGASEEK);
+}
+
+void keyMegaSeek(){
+	seekSeconds(MEGASEEK);
+}
+
+void keyNormSeekBack(){
+	seekSeconds(-1*NORMSEEK);
+}
+
+void keyNormSeek(){
+	seekSeconds(NORMSEEK);
+}
+
+void keyMiniSeekBack(){
+	seekSeconds(-1*MINISEEK);
+}
+
+void keyMiniSeek(){
+	seekSeconds(MINISEEK);
+}
+
+void keyQuit(){
+	setLastAction("Quit");
+	running=0;
+}
+
+void keyPause(){
+	togglePause();
+}
+
+// When you set the start point for the sub incorrectly activate this.
+void keyResetSub(){
+	setLastAction("Reset current subtitle");
+	addingSub=0;
+}
+
+void keyBackSub(){
+	if (currentSubIndex==0){
+		setLastAction("Can't go back further");
+		addingSub=0;
+	}else{
+		setLastAction("Back");
+		--currentSubIndex;
+		addingSub=1;
+		addSubTime = rawStartTimes[currentSubIndex];
+	}
+}
+
+void keyEndSub(){
+	if (addingSub){
+		setLastAction("End subtitle");
+		addSub(addSubTime,getSeconds());
+		addingSub=0;
+	}else{
+		setLastAction("Can't set sub end point before start point.");
+	}
+}
+
+void keyAddSub(){
+	if (addingSub){
+		double _currentTime = getSeconds();
+		addSub(addSubTime,_currentTime);
+		addSubTime = _currentTime;
+		setLastAction("Next subtitle (a)");
+	}else{
+		setLastAction("Start subtitle");
+		addingSub=1;
+		addSubTime = getSeconds();
+	}
+}
+
+//////////////////////////////////
+
+void bindKey(int key, keyFunc toBind){
+	totalKeysBound++;
+	boundFuncs = realloc(boundFuncs, sizeof(keyFunc)*totalKeysBound);
+	boundKeys = realloc(boundKeys, sizeof(int)*totalKeysBound);
+
+	boundKeys[totalKeysBound-1] = key;
+	boundFuncs[totalKeysBound-1] = toBind;
+}
+
+void runKeyFunc(int key){
+	int i;
+	for (i=0;i<totalKeysBound;++i){
+		if (boundKeys[i]==key){
+			boundFuncs[i]();
+			break;
+		}
+	}
+}
+
+
+//
 void deinit(){
 	// Deinit curses
 	delwin(mainwin);
 	endwin();
 	refresh();
 
+	// This goes here because we open this in init function
+	fclose(backupFp);
+
 	#if QUIT_MPV_ON_END && !NO_MPV
 		sendMpvCommand("quit");
 	#endif
 }
 
-// 
 char init(int numArgs, char** argStr){
 	// Init mpv and subs from arguments
 	if (numArgs>=3 && numArgs<=4){
@@ -358,16 +502,16 @@ char init(int numArgs, char** argStr){
 		// If the raw output subs already exist, load them up.
 		if (fileExist(rawOutFilename)){
 			backupFp = fopen(rawOutFilename,"r");
-			int _maxReadIndex=0;
+			int _maxReadIndex=-1;
 			double _highestEnd=0;
 			while (!feof(backupFp)){
 				int _lastReadIndex;
 				double _lastReadStart;
 				double _lastReadEnd;
 				
-				fread(&(_lastReadIndex),sizeof(int),1,backupFp);
-				fread(&(_lastReadStart),sizeof(double),1,backupFp);
-				fread(&(_lastReadEnd),sizeof(double),1,backupFp);
+				if (fread(&(_lastReadIndex),sizeof(int),1,backupFp)!=1) break;
+				if (fread(&(_lastReadStart),sizeof(double),1,backupFp)!=1) break;
+				if (fread(&(_lastReadEnd),sizeof(double),1,backupFp)!=1) break;
 
 				rawStartTimes[_lastReadIndex]=_lastReadStart;
 				rawEndTimes[_lastReadIndex]=_lastReadEnd;
@@ -437,16 +581,30 @@ char init(int numArgs, char** argStr){
 	return 0;
 }
 
-// <in raw subs file> <out subs file>
 int main(int numArgs, char** argStr){
 	if (init(numArgs,argStr)){
 		return 1;
 	}
 
-	double addSubTime;
+	// Sub keybinds
+	bindKey('a',keyAddSub);
+	bindKey('d',keyReactAddSub);
+	bindKey('s',keyEndSub);
+	bindKey('z',keyBackSub);
+	bindKey('x',keyResetSub);
+	// Seek keybinds
+	bindKey(KEY_LEFT,keyMegaSeekBack);
+	bindKey(KEY_RIGHT,keyMegaSeek);
+	bindKey('q',keyMiniSeekBack);
+	bindKey('w',keyMiniSeek);
+	bindKey('1',keyNormSeekBack);
+	bindKey('2',keyNormSeek);
+	// Other keybinds
+	bindKey('`',keySeekPrevEnd);
+	bindKey(KEY_END,keyQuit);
+	bindKey(' ',keyPause);
 
-	//double lastTime = getSeconds();
-	while (currentSubIndex!=numRawSubs){
+	while (currentSubIndex!=numRawSubs && running){
 		// Process
 		char _timestampBuff[strlen(TIMEFORMAT)];
 		makeTimestamp(getSeconds(),_timestampBuff);
@@ -491,70 +649,8 @@ int main(int numArgs, char** argStr){
 
 		// Check inputs
 		int _nextInput = getch();
-
 		if (_nextInput!=ERR){
-			if (_nextInput=='d'){ // Seek back a bit then add the subtitle
-				seekSeconds(-1*REACTIONTIME); // Seek back a bit, account for reaction time
-				_nextInput='a'; // Trigger the 'a' input
-			}
-			if (_nextInput=='a'){ // Intentionally not else-if, see 'd' input code
-				if (addingSub){
-					double _currentTime = getSeconds();
-					addSub(addSubTime,_currentTime);
-					addSubTime = _currentTime;
-					setLastAction("Next subtitle (a)");
-				}else{
-					setLastAction("Start subtitle");
-					addingSub=1;
-					addSubTime = getSeconds();
-				}
-			}else if (_nextInput=='s'){
-				setLastAction("End subtitle");
-				addSub(addSubTime,getSeconds());
-				addingSub=0;
-			}else if (_nextInput=='z'){ // Like ^Z
-				if (currentSubIndex==0){
-					setLastAction("Can't go back further");
-					addingSub=0;
-				}else{
-					setLastAction("Back");
-					--currentSubIndex;
-					addingSub=1;
-					addSubTime = rawStartTimes[currentSubIndex];
-				}
-			}else if (_nextInput=='x'){ // Stands for "excape from this sub, I don't want to add it anymore!"
-				addingSub=0;
-			}else if (_nextInput==' '){
-				togglePause();
-			}else if (_nextInput==KEY_END){
-				setLastAction("Quit");
-				break;
-			}else if (_nextInput==KEY_LEFT){
-				seekSeconds(-1*LRSEEK);
-			}else if (_nextInput==KEY_RIGHT){
-				seekSeconds(LRSEEK);
-			}else if (_nextInput=='q'){
-				seekSeconds(-1*QWSEEK);
-			}else if (_nextInput=='w'){
-				seekSeconds(QWSEEK);
-			}else if (_nextInput=='1'){
-				seekSeconds(-1*ONETWOSEEK);
-			}else if (_nextInput=='2'){
-				seekSeconds(ONETWOSEEK);
-			}else if (_nextInput=='`'){ // Seek back to previous subtitle's end or current subtitle's start
-				if (addingSub){
-					seekAbsoluteSeconds(addSubTime);
-					setLastAction("Seek to current sub start");
-				}else{
-					if (currentSubIndex!=0){
-						seekAbsoluteSeconds(rawEndTimes[currentSubIndex-1]);
-						setLastAction("Seek to last sub's end");
-					}else{
-						seekAbsoluteSeconds(0);
-						setLastAction("Seek to start.");
-					}
-				}
-			}
+			runKeyFunc(_nextInput);
 		}
 
 		// Your last action is only displayed for so long
@@ -566,8 +662,6 @@ int main(int numArgs, char** argStr){
 		}
 	}
 	deinit();
-
-	fclose(backupFp);
 
 	//
 	printf("Writing srt...\n");
