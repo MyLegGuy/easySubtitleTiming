@@ -32,6 +32,7 @@
 #define SEEK_ABSOLUTE_FORMAT "no-osd seek %f absolute"
 
 #define GET_PAUSE_STATUS_COMMAND "\'{ \"command\": [\"get_property\", \"pause\"]}\'"
+#define GET_SECONDS_COMMAND "\'{ \"command\": [\"get_property\", \"playback-time\"] }\'"
 
 // Part 1 of the pause command sent to mpv
 #define PAUSE_COMMAND_SHARED "\'{ \"command\": [\"set_property\", \"pause\", "
@@ -168,12 +169,13 @@ void togglePause(){
 	FILE* fp = sendMpvCommand(GET_PAUSE_STATUS_COMMAND,1);
 	fread(dresult,sizeof(dresult),1,fp);
 	fclose(fp);
-
 	if (strstr(dresult,"success")!=NULL){
 		if (strstr(dresult,"true")!=NULL){
 			sendMpvCommand(PAUSE_COMMAND_SHARED UNPAUSE_STRING,0);
+			setLastAction("Unpause");
 		}else{
 			sendMpvCommand(PAUSE_COMMAND_SHARED PAUSE_STRING,0);
+			setLastAction("Pause");
 		}
 	}else{
 		setLastAction("Failed to get pause status.");
@@ -240,7 +242,7 @@ double getSeconds(){
 		// Step 1 - Get the info from mpv
 		char dresult[256];
 		dresult[0]='\0';
-		FILE* fp = popen("echo \'{ \"command\": [\"get_property\", \"playback-time\"] }\' | socat - "STRMLOC,"r");
+		FILE* fp = sendMpvCommand(GET_SECONDS_COMMAND,1);
 		fread(dresult,sizeof(dresult),1,fp);
 		fclose(fp);
 		if (strstr(dresult,"success")==NULL){
