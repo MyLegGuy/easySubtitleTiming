@@ -39,7 +39,7 @@ int secToMin(double time);
 int secToSec(double time);
 void seekAbsoluteSeconds(double time);
 void seekSeconds(double time);
-void sendMpvCommand(char* msg);
+FILE* sendMpvCommand(char* msg, char _getOutput);
 void setLastAction(char* _newMessage);
 long testMS();
 void togglePause();

@@ -1,5 +1,4 @@
 // todo - scrollbar
-// todo - proper pausing
 
 #include <stdio.h>
 #include <string.h>
@@ -31,6 +30,8 @@
 // Seek commands sent to mpv
 #define SEEK_FORMAT "no-osd seek %f exact"
 #define SEEK_ABSOLUTE_FORMAT "no-osd seek %f absolute"
+
+#define GET_PAUSE_STATUS_COMMAND "\'{ \"command\": [\"get_property\", \"pause\"]}\'"
 
 // Part 1 of the pause command sent to mpv
 #define PAUSE_COMMAND_SHARED "\'{ \"command\": [\"set_property\", \"pause\", "
@@ -105,13 +106,18 @@ int* boundKeys=NULL;
 // Dynamic
 char addingSub=0;
 int currentSubIndex=0;
-char isPaused=0;
 char* lastAction=NULL;
 int lastActionHP=0;
 double addSubTime; // Timestamp where you start adding the current subtitle
 char running=1;
 
 ///////////////////////////////////////
+void testMessage(char* str){
+	erase();
+	mvprintw(0,0,str);
+	refresh();
+	while(getch()==ERR);
+}
 
 #if NO_MPV
 	#include <time.h>
@@ -142,22 +148,35 @@ char fileExist(char* filename){
 	return 0;
 }
 
-void sendMpvCommand(char* msg){
+FILE* sendMpvCommand(char* msg, char _getOutput){
 	char buff[strlen(MPV_MESSAGE_FORMAT)+strlen(msg)+strlen(REDIRECTOUTPUT)];
 	sprintf(buff,MPV_MESSAGE_FORMAT,msg);
-	strcat(buff,REDIRECTOUTPUT); // Apply output redirection
-	system(buff);
+	if (!_getOutput){
+		strcat(buff,REDIRECTOUTPUT); // Apply output redirection if we don't need it.
+	}
+	if (_getOutput){
+		return popen(buff,"r");
+	}else{
+		system(buff);
+		return NULL;
+	}
 }
 
 void togglePause(){
-	if (isPaused){
-		sendMpvCommand(PAUSE_COMMAND_SHARED UNPAUSE_STRING);
-		isPaused=0;
-		setLastAction("Unpause");
+	char dresult[256];
+	dresult[0]='\0';
+	FILE* fp = sendMpvCommand(GET_PAUSE_STATUS_COMMAND,1);
+	fread(dresult,sizeof(dresult),1,fp);
+	fclose(fp);
+
+	if (strstr(dresult,"success")!=NULL){
+		if (strstr(dresult,"true")!=NULL){
+			sendMpvCommand(PAUSE_COMMAND_SHARED UNPAUSE_STRING,0);
+		}else{
+			sendMpvCommand(PAUSE_COMMAND_SHARED PAUSE_STRING,0);
+		}
 	}else{
-		sendMpvCommand(PAUSE_COMMAND_SHARED PAUSE_STRING);
-		isPaused=1;
-		setLastAction("Pause");
+		setLastAction("Failed to get pause status.");
 	}
 }
 
@@ -198,7 +217,7 @@ void seekAbsoluteSeconds(double time){
 	#else
 		char complete[strlen(SEEK_ABSOLUTE_FORMAT)+20];
 		sprintf(complete,SEEK_ABSOLUTE_FORMAT,time);
-		sendMpvCommand(complete);
+		sendMpvCommand(complete,0);
 	#endif
 }
 void seekSeconds(double time){
@@ -211,7 +230,7 @@ void seekSeconds(double time){
 	#else
 		char complete[strlen(SEEK_FORMAT)+20];
 		sprintf(complete,SEEK_FORMAT,time);
-		sendMpvCommand(complete);
+		sendMpvCommand(complete,0);
 	#endif
 }
 double getSeconds(){
@@ -220,6 +239,7 @@ double getSeconds(){
 	#else
 		// Step 1 - Get the info from mpv
 		char dresult[256];
+		dresult[0]='\0';
 		FILE* fp = popen("echo \'{ \"command\": [\"get_property\", \"playback-time\"] }\' | socat - "STRMLOC,"r");
 		fread(dresult,sizeof(dresult),1,fp);
 		fclose(fp);
@@ -486,7 +506,7 @@ void deinit(){
 	fclose(backupFp);
 
 	#if QUIT_MPV_ON_END && !NO_MPV
-		sendMpvCommand("quit");
+		sendMpvCommand("quit",0);
 	#endif
 }
 
