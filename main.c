@@ -1,5 +1,3 @@
-// todo - scrollbar
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -24,6 +22,9 @@
 #define SUBFORMATSTRING "%d\n%s --> %s\n%s\n\n"
 #define TIMEFORMAT "%02d:%02d:%02d,%03d"
 
+// Percent format for UI
+#define PERCENTFORMAT "(%.2f%%)"
+
 // How messages are sent to mpv, change this to use something other than socat.
 #define MPV_MESSAGE_FORMAT "echo %s | socat - "STRMLOC
 
@@ -32,6 +33,7 @@
 #define SEEK_ABSOLUTE_FORMAT "no-osd seek %f absolute"
 
 #define GET_PAUSE_STATUS_COMMAND "\'{ \"command\": [\"get_property\", \"pause\"]}\'"
+#define GET_PERCENT_STATUS_COMMAND "\'{ \"command\": [\"get_property\", \"percent-pos\"]}\'"
 #define GET_SECONDS_COMMAND "\'{ \"command\": [\"get_property\", \"playback-time\"] }\'"
 
 // Part 1 of the pause command sent to mpv
@@ -234,26 +236,36 @@ void seekSeconds(double time){
 		sendMpvCommand(complete,0);
 	#endif
 }
+double getMpvDouble(char* command){
+	// Step 1 - Get the info from mpv
+	char dresult[256];
+	FILE* fp = sendMpvCommand(command,1);
+	dresult[fread(dresult,1,sizeof(dresult)-1,fp)]='\0';
+	fclose(fp);
+
+	if (strstr(dresult,"success")==NULL){
+		return -1;
+	}
+
+	char* numStart = strstr(dresult,":");
+	char* numEnd = strstr(dresult,",");
+	numEnd[0]='\0';
+	numStart++;
+
+	return atof(numStart);
+}
+double getPercent(){
+	#if NO_MPV
+		return 10.0;
+	#else
+		return getMpvDouble(GET_PERCENT_STATUS_COMMAND);
+	#endif
+}
 double getSeconds(){
 	#if NO_MPV
 		return (testMS()-_startTime)/(double)1000;
 	#else
-		// Step 1 - Get the info from mpv
-		char dresult[256];
-		FILE* fp = sendMpvCommand(GET_SECONDS_COMMAND,1);
-		dresult[fread(dresult,sizeof(dresult)-1,1,fp)]='\0';
-		fclose(fp);
-		if (strstr(dresult,"success")==NULL){
-			return -1;
-		}
-		// Parse info
-		//{"data":434.476000,"error":"success"}
-		char* numStart = strstr(dresult,":");
-		char* numEnd = strstr(dresult,",");
-		numEnd[0]='\0';
-		numStart++;
-		//
-		return atof(numStart);
+		return getMpvDouble(GET_SECONDS_COMMAND);
 	#endif
 }
 int secToMilli(double time){
@@ -679,6 +691,8 @@ int main(int numArgs, char** argStr){
 		drawDivider(LINES-listBottomPad);
 		mvprintw(LINES-listBottomPad+1,0,"%s",lastAction);
 		mvprintw(LINES-listBottomPad+2,0,_timestampBuff);
+		addch(' '); // Skip a space before drawing percent
+		printw(PERCENTFORMAT,getPercent());
 		///////////////
 		refresh();
 
