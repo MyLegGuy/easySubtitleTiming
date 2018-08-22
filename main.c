@@ -6,15 +6,10 @@
 
 #include "main.h"
 
-// For testing
-#define NO_MPV 0
-
 // Color indices
 #define COL_ADDINGSUB 1 // You've selected the sub start point
 
 ///////////////////////////////////////
-//https://mpv.io/manual/master/#list-of-input-commands
-
 // The application should have access to this file
 #define STRMLOC "/tmp/mpvtypeset"
 
@@ -28,13 +23,10 @@
 // How messages are sent to mpv, change this to use something other than socat.
 #define MPV_MESSAGE_FORMAT "echo %s | socat - "STRMLOC
 
+// https://mpv.io/manual/master/#list-of-input-commands
 // Seek commands sent to mpv
 #define SEEK_FORMAT "no-osd seek %f exact"
 #define SEEK_ABSOLUTE_FORMAT "no-osd seek %f absolute"
-
-#define GET_PAUSE_STATUS_COMMAND "\'{ \"command\": [\"get_property\", \"pause\"]}\'"
-#define GET_PERCENT_STATUS_COMMAND "\'{ \"command\": [\"get_property\", \"percent-pos\"]}\'"
-#define GET_SECONDS_COMMAND "\'{ \"command\": [\"get_property\", \"playback-time\"] }\'"
 
 // Part 1 of the pause command sent to mpv
 #define PAUSE_COMMAND_SHARED "\'{ \"command\": [\"set_property\", \"pause\", "
@@ -42,8 +34,10 @@
 #define PAUSE_STRING "true] }\'"
 #define UNPAUSE_STRING "false] }\'"
 
-// Actually, I think you can have blank lines.
-#define BLANKLINEREPLACEMENT ""
+//
+#define GET_PAUSE_STATUS_COMMAND "\'{ \"command\": [\"get_property\", \"pause\"]}\'"
+#define GET_PERCENT_STATUS_COMMAND "\'{ \"command\": [\"get_property\", \"percent-pos\"]}\'"
+#define GET_SECONDS_COMMAND "\'{ \"command\": [\"get_property\", \"playback-time\"] }\'"
 
 // This is appended to some commands to prevent their output messing with curses
 #define REDIRECTOUTPUT " > /dev/null"
@@ -70,7 +64,6 @@
 #define SEEK_STATUS_FORMAT "Seek %f"
 #define SEEK_STATUS_ABSOLUTE_FORMAT "Seek to %f"
 
-#define QUIT_MPV_ON_END 1
 // If it asking you at the end every time is annoying
 #define CREATE_MKA_ON_END 1
 
@@ -121,16 +114,6 @@ void testMessage(char* str){
 	refresh();
 	while(getch()==ERR);
 }
-
-#if NO_MPV
-	#include <time.h>
-	long _startTime=0;
-	long testMS(){
-		struct timespec _myTime;
-		clock_gettime(CLOCK_MONOTONIC, &_myTime);
-		return _myTime.tv_nsec/1000000+_myTime.tv_sec*1000;
-	}
-#endif
 
 // Not for curses
 // getc but it ignores newline character
@@ -215,26 +198,18 @@ void seekAbsoluteSeconds(double time){
 	sprintf(buff,SEEK_STATUS_ABSOLUTE_FORMAT,time);
 	setLastAction(buff);
 
-	#if NO_MPV
-		_startTime+=time;
-	#else
-		char complete[strlen(SEEK_ABSOLUTE_FORMAT)+20];
-		sprintf(complete,SEEK_ABSOLUTE_FORMAT,time);
-		sendMpvCommand(complete,0);
-	#endif
+	char complete[strlen(SEEK_ABSOLUTE_FORMAT)+20];
+	sprintf(complete,SEEK_ABSOLUTE_FORMAT,time);
+	sendMpvCommand(complete,0);
 }
 void seekSeconds(double time){
 	char buff[strlen(SEEK_STATUS_FORMAT)+20];
 	sprintf(buff,SEEK_STATUS_FORMAT,time);
 	setLastAction(buff);
 
-	#if NO_MPV
-		_startTime-=time*1000;
-	#else
-		char complete[strlen(SEEK_FORMAT)+20];
-		sprintf(complete,SEEK_FORMAT,time);
-		sendMpvCommand(complete,0);
-	#endif
+	char complete[strlen(SEEK_FORMAT)+20];
+	sprintf(complete,SEEK_FORMAT,time);
+	sendMpvCommand(complete,0);
 }
 double getMpvDouble(char* command){
 	// Step 1 - Get the info from mpv
@@ -255,18 +230,10 @@ double getMpvDouble(char* command){
 	return atof(numStart);
 }
 double getPercent(){
-	#if NO_MPV
-		return 10.0;
-	#else
-		return getMpvDouble(GET_PERCENT_STATUS_COMMAND);
-	#endif
+	return getMpvDouble(GET_PERCENT_STATUS_COMMAND);
 }
 double getSeconds(){
-	#if NO_MPV
-		return (testMS()-_startTime)/(double)1000;
-	#else
-		return getMpvDouble(GET_SECONDS_COMMAND);
-	#endif
+	return getMpvDouble(GET_SECONDS_COMMAND);
 }
 int secToMilli(double time){
 	return (time-(int)time)*1000;
@@ -291,10 +258,6 @@ void writeSingleSrt(int index, double startTime, double endTime, char* string, F
 
 	makeTimestamp(startTime,strstampone);
 	makeTimestamp(endTime,strstamptwo);
-
-	if (strlen(string)==0){ // Can't write blank lines
-		string = BLANKLINEREPLACEMENT;
-	}
 
 	char complete[strlen(SUBFORMATSTRING)+strlen(strstampone)+strlen(string)+strlen(strstamptwo)+1];
 	sprintf(complete,SUBFORMATSTRING,index,strstampone,strstamptwo,string);
@@ -517,9 +480,7 @@ void deinit(){
 	// This goes here because we open this in init function
 	fclose(backupFp);
 
-	#if QUIT_MPV_ON_END && !NO_MPV
-		sendMpvCommand("quit",0);
-	#endif
+	sendMpvCommand("quit",0);
 }
 
 char init(int numArgs, char** argStr){
