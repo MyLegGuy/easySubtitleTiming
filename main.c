@@ -341,6 +341,16 @@ void waitMpvStart(){
 
 //////////////////////////////////
 
+void keySkipSub(){
+	if (addingSub){
+		setLastAction("Can't skip if you're adding a sub right now.");
+	}else{
+		setLastAction("Skip subtitle");
+		double _currentTime = getSeconds();
+		addSub(_currentTime,_currentTime);
+	}
+}
+
 void keyReactAddSub(){
 	seekSeconds(-1*REACTIONTIME); // Seek back a bit, account for reaction time
 	keyAddSub();
@@ -434,6 +444,7 @@ void keyEndSub(){
 		setLastAction("Can't set sub end point before start point");
 	}
 }
+
 
 void keyAddSub(){
 	if (addingSub){
@@ -592,6 +603,7 @@ char init(int numArgs, char** argStr){
 	bindKey('s',keyEndSub);
 	bindKey('z',keyBackSub);
 	bindKey('x',keyResetSub);
+	bindKey('S',keySkipSub);
 	// Seek keybinds
 	bindKey(KEY_LEFT,keyMegaSeekBack);
 	bindKey(KEY_RIGHT,keyMegaSeek);
@@ -679,7 +691,9 @@ int main(int numArgs, char** argStr){
 	FILE* outfp = fopen(srtOutFilename,"w");
 	int i;
 	for (i=0;i<currentSubIndex;++i){
-		writeSingleSrt(i+1,rawStartTimes[i],rawEndTimes[i],rawSubs[i],outfp);
+		if (rawStartTimes[i]!=rawEndTimes[i]){ // If both are the same, that indicates a skipped subtitle. Skip skipped subtitles.
+			writeSingleSrt(i+1,rawStartTimes[i],rawEndTimes[i],rawSubs[i],outfp);
+		}
 	}
 	fclose(outfp);
 
