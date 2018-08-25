@@ -151,7 +151,7 @@ FILE* sendMpvCommand(char* msg, char _getOutput){
 void togglePause(){
 	char dresult[256];
 	FILE* fp = sendMpvCommand(GET_PAUSE_STATUS_COMMAND,1);
-	dresult[fread(dresult,sizeof(dresult)-1,1,fp)]='\0';
+	dresult[fread(dresult,1,sizeof(dresult)-1,fp)]='\0';
 	fclose(fp);
 	if (strstr(dresult,"success")!=NULL){
 		if (strstr(dresult,"true")!=NULL){
