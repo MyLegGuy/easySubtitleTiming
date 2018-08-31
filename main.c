@@ -120,7 +120,7 @@ void testMessage(char* str){
 int goodGetC(FILE* fp){
 	int _answer;
 	do{
-		_answer = getc(stdin);
+		_answer = getc(fp);
 	}while(_answer==10);
 	return _answer;
 }
