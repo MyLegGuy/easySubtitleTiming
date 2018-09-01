@@ -1,3 +1,5 @@
+// TODO - For seeking commands, ignore subs that have been skipped with 'S' key
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -542,7 +544,7 @@ char init(int numArgs, char** argStr){
 			}
 			currentSubIndex = _maxReadIndex+1;
 			if (currentSubIndex==numRawSubs){
-				printf("This sub project is already complete.\nWhat would you like to do?\n---\n1 - Reopen this project, but discard the typesetting for the last subtitle.\n2 - Reopen this project, but just regenerate the srt and mka.\n3 - Exit without doing anything.\n---\n");
+				printf("This sub project is already complete.\nWhat would you like to do?\n---\n1 - Reopen this project, but discard the timing for the last subtitle.\n2 - Reopen this project, but just regenerate the srt and mka.\n3 - Exit without doing anything.\n---\n");
 				int _answer = goodGetC(stdin);
 				if (_answer=='1'){
 					currentSubIndex--; // Discard last sub
@@ -633,7 +635,7 @@ int main(int numArgs, char** argStr){
 		// Draw
 		erase();
 		///////////////
-		mvprintw(0,0,"Minimal Typesetting");
+		mvprintw(0,0,"Minimal Timing");
 		drawDivider(1);
 		//
 		if (currentSubIndex<listHalfDrawLength){
