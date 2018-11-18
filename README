@@ -32,6 +32,7 @@ Default keybindings:
 		's' - Set the end point for your current subtitle and advance to the next one.
 		'z' - Deletes the last subtitle's endpoint (and discards the current subtitle's start point if it exists). Use this key if you messed up the last subtitle.
 		'x' - Delete the current subtitle's start point. If you start a sub too early or late, use this key. If you press 'z' and then this key, you can completely undo the last subtitle.
+		'S' - Skip this subtitle. Internally, this sets the sub's start and end points to the same time.
 		-- Keybindings for seeking --
 		'q' - Seek back a little bit. By default .5 seconds.
 			'w' - Same as 'q' but forward.
