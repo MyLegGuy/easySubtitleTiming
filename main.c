@@ -45,7 +45,7 @@
 #define REDIRECTOUTPUT " > /dev/null"
 
 //
-#define STARTMPVFORMAT "mpv --keep-open=yes --really-quiet --input-ipc-server "STRMLOC" --no-input-terminal "STRMLOC" %s & disown"
+#define STARTMPVFORMAT "mpv --force-window=no --keep-open=yes --really-quiet --input-ipc-server "STRMLOC" --no-input-terminal "STRMLOC" %s & disown"
 
 // output mka, in audio file, in sub file
 #define MAKEMKACOMMAND "mkvmerge -o %s %s %s"

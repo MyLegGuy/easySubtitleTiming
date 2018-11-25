@@ -43,7 +43,7 @@ Default keybindings:
 		'`' - If you've already set your current subtitle's start point, seek there. If you haven't, seek to the previous subtitle's end point.
 		-- Etc --
 		'~' - Seek to the last subtitle's end point and sets your current subtitle's start point there.
-		'KEY_END' - Save and quit
+		KEY_END - Save and quit
 		' ' - (Spacebar) - Toggle pause.
 
 Customization:
